@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>clara omeg</title>
-  <!-- Fuente bonita -->
   <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <style>
@@ -112,6 +111,8 @@
     // — CONFIG JSONBin —
     const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
     const BIN_ID  = '684abe418561e97a5022f0ef';
+    // tiempo de inactividad tras el cual se purga (20 s)
+    const TIMEOUT = 20_000;
 
     // — DOM —
     const status       = document.getElementById('status');
@@ -125,7 +126,7 @@
     const btnStart     = document.getElementById('btnStart');
     const btnSkip      = document.getElementById('btnSkip');
 
-    // — P2P & STATE —
+    // — P2P & STREAM —
     const peer       = new Peer();
     let myID         = '';
     let localStream  = null;
@@ -139,7 +140,7 @@
       console[isError ? 'error' : 'log'](txt);
     }
 
-    // — JSONBin helpers —
+    // — JSONBin helpers (objeto id→timestamp) —
     async function fetchBin() {
       setStatus('Obteniendo cola…');
       const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
@@ -147,12 +148,13 @@
       });
       if (!res.ok) {
         log('Error fetchBin ' + res.status);
-        return [];
+        return {};
       }
       const { record } = await res.json();
-      return Array.isArray(record) ? record : [];
+      // aseguramos que sea objeto
+      return (record && typeof record === 'object') ? record : {};
     }
-    async function updateBin(list) {
+    async function updateBin(obj) {
       setStatus('Actualizando cola…');
       const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
         method: 'PUT',
@@ -160,43 +162,43 @@
           'Content-Type': 'application/json',
           'X-Master-Key': API_KEY
         },
-        body: JSON.stringify(list)
+        body: JSON.stringify(obj)
       });
-      if (!res.ok) {
-        log('Error updateBin ' + res.status);
-      }
+      if (!res.ok) log('Error updateBin ' + res.status);
     }
 
-    // — QUEUE LOGIC —
+    // — MANTENIMIENTO de cola con timestamps —
     async function enterQueue() {
-      const list = await fetchBin();
-      if (!list.includes(myID)) {
-        list.push(myID);
-        await updateBin(list);
+      const bin = await fetchBin();
+      // purgar inactivos
+      const now = Date.now();
+      for (const [id, ts] of Object.entries(bin)) {
+        if (now - ts > TIMEOUT) delete bin[id];
       }
-      setStatus(`En cola. Usuarios totales: ${ (await fetchBin()).length }`);
+      // actualizar mi timestamp
+      bin[myID] = now;
+      await updateBin(bin);
+      setStatus(`En cola. Usuarios activos: ${Object.keys(bin).length}`);
     }
+
     async function leaveQueue() {
-      try {
-        const list = await fetchBin();
-        const filtered = list.filter(id => id !== myID);
-        // Si estamos saliendo/unload, usar sendBeacon
-        if (navigator.sendBeacon && window._isUnloading) {
-          const url = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-          const data = JSON.stringify(filtered);
-          navigator.sendBeacon(url, data);
-        } else {
-          await updateBin(filtered);
-        }
-        setStatus('Saliste de la cola');
-      } catch (e) {
-        console.error('Error leaveQueue:', e);
-      }
+      const bin = await fetchBin();
+      delete bin[myID];
+      await updateBin(bin);
+      setStatus('Saliste de la cola');
     }
+
     async function joinRandom() {
-      const list = await fetchBin();
-      const others = list.filter(id => id !== myID);
-      setStatus(`Usuarios en espera: ${others.length}`);
+      const bin = await fetchBin();
+      // purgar y actualizar
+      const now = Date.now();
+      for (const [id, ts] of Object.entries(bin)) {
+        if (now - ts > TIMEOUT) delete bin[id];
+      }
+      await updateBin(bin);
+      // emparejar
+      const others = Object.keys(bin).filter(id => id !== myID);
+      setStatus(`Usuarios disponibles: ${others.length}`);
       if (!others.length) {
         log('Nadie más conectado', false);
         return;
@@ -252,6 +254,8 @@
         vidStart.srcObject = stream;
         vidLocal.srcObject  = stream;
         setStatus('Stream listo. Tu ID: ' + myID);
+        // cada 10 s refrescamos mi timestamp
+        setInterval(enterQueue, TIMEOUT / 2);
       })
       .catch(err => {
         log('No access: ' + err.message);
@@ -259,19 +263,21 @@
       });
 
     filterSelect.addEventListener('change', () => {
-      const style1 = vidStart.style;
-      const style2 = vidLocal.style;
-      const val = filterSelect.value;
+      const s1 = vidStart.style, s2 = vidLocal.style, val = filterSelect.value;
       if (val === 'mirror') {
-        [style1, style2].forEach(s => { s.transform = 'scaleX(-1)'; s.filter = ''; });
+        [s1, s2].forEach(s => { s.transform = 'scaleX(-1)'; s.filter = ''; });
       } else if (val === 'zoom') {
-        [style1, style2].forEach(s => { s.transform = 'scale(2)'; s.transformOrigin = 'center center'; s.filter = ''; });
+        [s1, s2].forEach(s => {
+          s.transform = 'scale(2)';
+          s.transformOrigin = 'center center';
+          s.filter = '';
+        });
       } else {
-        [style1, style2].forEach(s => { s.transform = ''; s.filter = val; });
+        [s1, s2].forEach(s => { s.transform = ''; s.filter = val; });
       }
     });
 
-    // — BUTTONS & EVENTS —
+    // — BOTONES —
     btnStart.onclick = async () => {
       btnStart.disabled = true;
       startScreen.classList.add('hidden');
@@ -286,10 +292,11 @@
       await joinRandom();
     };
 
-    // — Garantizar salida de la cola al cerrar/navegar —
-    window.addEventListener('beforeunload', () => { window._isUnloading = true; leaveQueue(); });
-    window.addEventListener('pagehide',    () => { window._isUnloading = true; leaveQueue(); });
-    window.addEventListener('unload',      () => { window._isUnloading = true; leaveQueue(); });
+    // — Al cerrar, nos borramos de la cola de forma explícita —
+    window.addEventListener('beforeunload', leaveQueue);
+    window.addEventListener('pagehide',    leaveQueue);
+    window.addEventListener('unload',      leaveQueue);
+
   </script>
 </body>
 </html>
