@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Salas de Videollamada Reales</title>
+  <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <style>
+    body {
+      background: #111;
+      color: white;
+      font-family: sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 5px;
+      background: crimson;
+      color: white;
+      cursor: pointer;
+    }
+    #videos {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 15px;
+      margin-top: 20px;
+    }
+    .room {
+      background: #222;
+      padding: 10px;
+      border-radius: 10px;
+      width: 180px;
+    }
+    video {
+      width: 160px;
+      height: 120px;
+      background: black;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Salas de Videollamada</h1>
+  <button onclick="createRoom()">Crear Sala</button>
+  <div id="videos"></div>
+
+  <script>
+    const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
+    const BIN_ID = '684abe418561e97a5022f0ef';
+
+    const peer = new Peer();
+    let myID = '';
+    let localStream;
+
+    const videosDiv = document.getElementById("videos");
+
+    async function fetchBin() {
+      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+        headers: { 'X-Master-Key': API_KEY }
+      });
+      const data = await res.json();
+      return data.record;
+    }
+
+    async function updateBin(data) {
+      await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Master-Key': API_KEY
+        },
+        body: JSON.stringify(data)
+      });
+    }
+
+    async function initBinIfEmpty() {
+      try {
+        const data = await fetchBin();
+        if (!data || (Object.keys(data).length === 1 && data.init)) {
+          await updateBin({});
+        }
+      } catch (e) {
+        console.error("Error al inicializar el bin:", e);
+      }
+    }
+
+    navigator.mediaDevices.getUserMedia({
+      video: { width: 160, height: 120 },
+      audio: true
+    }).then(async stream => {
+      localStream = stream;
+
+      peer.on('open', async id => {
+        myID = id;
+        await initBinIfEmpty();
+        setInterval(fetchRooms, 5000);
+      });
+
+      peer.on('call', call => {
+        call.answer(localStream);
+        call.on('stream', remoteStream => {
+          showRemoteVideo(remoteStream);
+        });
+      });
+    });
+
+    async function createRoom() {
+      try {
+        const rooms = (await fetchBin()) || {};
+        rooms[myID] = Date.now();
+        await updateBin(rooms);
+      } catch (e) {
+        console.error("Error creando sala:", e);
+      }
+    }
+
+    async function fetchRooms() {
+      try {
+        const rooms = (await fetchBin()) || {};
+        const now = Date.now();
+        videosDiv.innerHTML = '';
+
+        for (const id in rooms) {
+          if (id === myID) continue;
+          if (now - rooms[id] > 20000) continue; // sala inactiva
+
+          const room = document.createElement("div");
+          room.className = "room";
+
+          const placeholder = document.createElement("video");
+          placeholder.autoplay = true;
+          placeholder.muted = true;
+          placeholder.srcObject = null;
+
+          const btn = document.createElement("button");
+          btn.textContent = "Unirse";
+          btn.onclick = () => {
+            const call = peer.call(id, localStream);
+            call.on('stream', remoteStream => {
+              showRemoteVideo(remoteStream);
+            });
+          };
+
+          room.appendChild(placeholder);
+          room.appendChild(document.createTextNode("Sala: " + id.substring(0, 6)));
+          room.appendChild(document.createElement("br"));
+          room.appendChild(btn);
+
+          videosDiv.appendChild(room);
+        }
+      } catch (e) {
+        console.error("Error al obtener salas:", e);
+      }
+    }
+
+    function showRemoteVideo(stream) {
+      videosDiv.innerHTML = '';
+      const room = document.createElement("div");
+      room.className = "room";
+
+      const video = document.createElement("video");
+      video.autoplay = true;
+      video.srcObject = stream;
+
+      room.appendChild(video);
+      room.appendChild(document.createTextNode("Conectado"));
+      videosDiv.appendChild(room);
+    }
+  </script>
+
+</body>
+</html>
