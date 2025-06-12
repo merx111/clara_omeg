@@ -3,81 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <title>clara omeg</title>
-  <!-- Fuente bonita -->
   <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: #111;
-      color: #eee;
-      font-family: sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      height: 100vh;
-      overflow: hidden;
-    }
-    h1 {
-      font-family: 'Pacifico', cursive;
-      font-size: 3rem;
-      margin: 1rem 0;
-    }
+    body { background: #111; color: #eee; font-family: sans-serif; text-align: center; }
+    #status { margin: .5rem; font-size: .9rem; color: #ccc; }
+    #log { margin: .5rem; font-size: .9rem; color: #f88; min-height: 1.2rem; }
+    video { background: black; border-radius: 8px; transition: .3s; }
+    #start-screen video, #chat-screen video { width: 80vw; max-width: 640px; height: auto; }
+    #chat-screen #videos { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    button { padding: 1rem 2rem; margin: .5rem; font-size: 1.1rem; border: none; border-radius: 8px; background: crimson; color: white; cursor: pointer; }
+    button:disabled { background: #555; cursor: default; }
+    #filters { margin-top: 1rem; display: flex; align-items: center; gap: .5rem; }
+    select { padding: .4rem; font-size: 1rem; border-radius: 4px; border: none; background: #333; color: #eee; }
     .hidden { display: none; }
-    video {
-      background: black;
-      border-radius: 8px;
-      /* transición suave al cambiar filtro/transform */
-      transition: filter .3s, transform .3s;
-    }
-    #start-screen video,
-    #chat-screen video {
-      width: 80vw;
-      max-width: 640px;
-      height: auto;
-    }
-    #chat-screen #videos {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    button {
-      padding: 1rem 2rem;
-      margin: .5rem;
-      font-size: 1.25rem;
-      border: none;
-      border-radius: 8px;
-      background: crimson;
-      color: white;
-      cursor: pointer;
-    }
-    button:disabled {
-      background: #555;
-      cursor: default;
-    }
-    #filters {
-      margin-top: 1rem;
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-    }
-    select {
-      padding: .5rem;
-      font-size: 1rem;
-      border-radius: 4px;
-      border: none;
-      background: #333;
-      color: #eee;
-    }
   </style>
 </head>
 <body>
 
+  <div id="status">Inicializando…</div>
+  <div id="log"></div>
+
   <!-- PANTALLA INICIAL -->
   <div id="start-screen">
-    <h1>clara omeg</h1>
+    <h1 style="font-family:'Pacifico',cursive">clara omeg</h1>
     <video id="video-local-start" autoplay muted></video>
     <div id="filters">
       <label for="filter-select">Filtro:</label>
@@ -89,8 +38,6 @@
         <option value="contrast(200%)">Contraste ↑</option>
         <option value="mirror">Espejo</option>
         <option value="zoom">Zoom (cara grande)</option>
-        <option value="blur(5px)">Desenfoque</option>
-        <option value="brightness(150%)">Brillo ↑</option>
       </select>
     </div>
     <button id="btnStart">Comenzar</button>
@@ -106,148 +53,147 @@
   </div>
 
   <script>
-    // ——— CONFIG JSONBin ———
+    // — CONFIG JSONBin —
     const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
     const BIN_ID  = '684abe418561e97a5022f0ef';
 
-    // ——— DOM ———
-    const startScreen    = document.getElementById('start-screen');
-    const chatScreen     = document.getElementById('chat-screen');
-    const vidStart       = document.getElementById('video-local-start');
-    const vidLocal       = document.getElementById('video-local');
-    const vidRemote      = document.getElementById('video-remote');
-    const filterSelect   = document.getElementById('filter-select');
-    const btnStart       = document.getElementById('btnStart');
-    const btnSkip        = document.getElementById('btnSkip');
+    // — DOM —
+    const status       = document.getElementById('status');
+    const logDiv       = document.getElementById('log');
+    const startScreen  = document.getElementById('start-screen');
+    const chatScreen   = document.getElementById('chat-screen');
+    const vidStart     = document.getElementById('video-local-start');
+    const vidLocal     = document.getElementById('video-local');
+    const vidRemote    = document.getElementById('video-remote');
+    const filterSelect = document.getElementById('filter-select');
+    const btnStart     = document.getElementById('btnStart');
+    const btnSkip      = document.getElementById('btnSkip');
 
-    // ——— P2P & STREAM ———
+    // — P2P & STATE —
     const peer       = new Peer();
-    let myID         = '', localStream = null, currentCall = null;
+    let myID         = '';
+    let localStream  = null;
+    let currentCall  = null;
 
-    // ——— JSONBin UTILS ———
-    async function fetchBin() {
+    function setStatus(txt) { status.textContent = txt; }
+    function log(txt, isError = true) {
+      logDiv.textContent = txt;
+      console[isError ? 'error' : 'log'](txt);
+    }
+
+    // — JSONBin helpers —
+    async function fetchBin(){
+      setStatus('Obteniendo cola…');
       const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-        headers: {'X-Master-Key': API_KEY}
+        headers: {'X-Master-Key':API_KEY}
       });
-      if (!res.ok) throw new Error('Error fetchBin ' + res.status);
-      const { record } = await res.json();
+      if(!res.ok) { log('Error fetchBin '+res.status); return []; }
+      const {record} = await res.json();
       return Array.isArray(record) ? record : [];
     }
-    async function updateBin(list) {
+    async function updateBin(list){
+      setStatus('Actualizando cola…');
       const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type':'application/json',
-          'X-Master-Key': API_KEY
-        },
-        body: JSON.stringify(list)
+        method:'PUT',
+        headers:{'Content-Type':'application/json','X-Master-Key':API_KEY},
+        body:JSON.stringify(list)
       });
-      if (!res.ok) throw new Error('Error updateBin ' + res.status);
+      if(!res.ok) log('Error updateBin '+res.status);
     }
 
-    // ——— EMPAREJAMIENTO ———
-    async function enterQueue() {
+    // — QUEUE LOGIC —
+    async function enterQueue(){
       const list = await fetchBin();
-      if (!list.includes(myID)) {
+      if(!list.includes(myID)){
         list.push(myID);
         await updateBin(list);
       }
+      setStatus(`En cola. Usuarios totales: ${list.length}`);
     }
-    async function leaveQueue() {
+    async function leaveQueue(){
       const list = await fetchBin();
-      await updateBin(list.filter(id => id !== myID));
+      const filtered = list.filter(id=>id!==myID);
+      await updateBin(filtered);
+      setStatus('Saliste de la cola');
     }
-    async function joinRandom() {
+    async function joinRandom(){
       const list = await fetchBin();
-      const others = list.filter(id => id !== myID);
-      if (!others.length) {
-        alert('No hay nadie disponible, espera un momento…');
-        return;
-      }
-      const peerID = others[Math.floor(Math.random() * others.length)];
+      const others = list.filter(id=>id!==myID);
+      setStatus(`Usuarios en espera: ${list.length-1}`);
+      if(!others.length) return log('Nadie más conectado', false);
+      const peerID = others[Math.floor(Math.random()*others.length)];
       startCall(peerID);
     }
 
-    // ——— LLAMADAS ———
-    function startCall(remoteID) {
-      if (currentCall) currentCall.close();
+    // — P2P CALLS —
+    function startCall(remoteID){
+      log(`Llamando a ${remoteID}`, false);
+      if(currentCall) currentCall.close();
       currentCall = peer.call(remoteID, localStream);
       setupCall(currentCall);
-      btnSkip.disabled = false;
+      btnSkip.disabled=false;
     }
-    function setupCall(call) {
-      call.on('stream', s => vidRemote.srcObject = s);
-      call.on('close', cleanupCall);
-      call.on('error', cleanupCall);
+    function setupCall(call){
+      call.on('stream', s=>{ vidRemote.srcObject=s; setStatus('Conectado con '+call.peer); });
+      call.on('close', cleanup);
+      call.on('error', e=>{ log('Error en call '+e); cleanup(); });
     }
-    function cleanupCall() {
-      vidRemote.srcObject = null;
-      currentCall = null;
-      btnSkip.disabled = true;
+    function cleanup(){
+      vidRemote.srcObject=null;
+      currentCall=null;
+      btnSkip.disabled=true;
+      setStatus('Conexión finalizada');
     }
 
-    // ——— PEERJS ———
-    peer.on('open', id => myID = id);
-    peer.on('call', call => {
-      if (currentCall) call.close();
-      currentCall = call;
+    // — PEERJS EVENTS —
+    peer.on('open', id=>{
+      myID=id;
+      setStatus('ID: '+id);
+    });
+    peer.on('call', call=>{
+      log('Llamada entrante de '+call.peer, false);
+      if(currentCall) call.close();
+      currentCall=call;
       call.answer(localStream);
       setupCall(call);
-      btnSkip.disabled = false;
+      btnSkip.disabled=false;
     });
 
-    // ——— STREAM LOCAL & FILTROS ———
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        localStream = stream;
-        vidStart.srcObject = stream;
-        vidLocal.srcObject = stream;
+    // — LOCAL STREAM & FILTERS —
+    navigator.mediaDevices.getUserMedia({video:true,audio:true})
+      .then(stream=>{
+        localStream=stream;
+        vidStart.srcObject=stream;
+        vidLocal.srcObject=stream;
+        setStatus('Stream listo. ID: '+myID);
       })
-      .catch(() => alert('Permite cámara y micrófono.'));
+      .catch(e=>{ log('No access '+e.message); alert('Permite cámara/micrófono.'); });
 
-    filterSelect.addEventListener('change', () => {
-      const vStart = vidStart.style;
-      const vLocal = vidLocal.style;
-      const val = filterSelect.value;
-      // espejo
-      if (val === 'mirror') {
-        vStart.transform = 'scaleX(-1)';
-        vLocal.transform = 'scaleX(-1)';
-        vStart.filter = vLocal.filter = '';
-      }
-      // zoom
-      else if (val === 'zoom') {
-        vStart.transform = 'scale(2)';
-        vStart.transformOrigin = 'center center';
-        vLocal.transform = 'scale(2)';
-        vLocal.transformOrigin = 'center center';
-        vStart.filter = vLocal.filter = '';
-      }
-      // resto filtros CSS
-      else {
-        vStart.transform = '';
-        vLocal.transform = '';
-        vStart.filter = val;
-        vLocal.filter = val;
+    filterSelect.addEventListener('change', ()=>{
+      const v1=vidStart.style, v2=vidLocal.style, val=filterSelect.value;
+      if(val==='mirror'){
+        [v1,v2].forEach(v=>{v.transform='scaleX(-1)'; v.filter='';});
+      } else if(val==='zoom'){
+        [v1,v2].forEach(v=>{v.transform='scale(2)'; v.transformOrigin='center center'; v.filter='';});
+      } else {
+        [v1,v2].forEach(v=>{v.transform=''; v.filter=val;});
       }
     });
 
-    // ——— BOTONES ———
-    btnStart.onclick = async () => {
-      btnStart.disabled = true;
+    // — BUTTONS —
+    btnStart.onclick=async()=>{
+      btnStart.disabled=true;
       startScreen.classList.add('hidden');
       chatScreen.classList.remove('hidden');
       await enterQueue();
       await joinRandom();
     };
-
-    btnSkip.onclick = async () => {
-      cleanupCall();
+    btnSkip.onclick=async()=>{
+      cleanup();
       await leaveQueue();
       await enterQueue();
       await joinRandom();
     };
-
     window.addEventListener('beforeunload', leaveQueue);
   </script>
 </body>
