@@ -1,65 +1,51 @@
 body {
-  margin: 0;
-  font-family: sans-serif;
-  background: #111;
-  color: white;
+  font-family: Arial, sans-serif;
+  margin: 20px;
+}
+
+#roomsContainer div.room {
+  margin: 8px 0;
+}
+
+#videoContainer {
   display: flex;
-  flex-direction: column;
   align-items: center;
-}
-
-header {
-  background: #222;
-  width: 100%;
-  padding: 1rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-button {
-  background: #00bfa5;
-  color: white;
-  padding: 0.5rem 1rem;
-  border: none;
-  cursor: pointer;
-  border-radius: 5px;
-  font-weight: bold;
-}
-
-button:disabled {
-  background: #555;
-  cursor: not-allowed;
-}
-
-main {
-  padding: 1rem;
-  max-width: 800px;
-  width: 100%;
-}
-
-.room {
-  background: #1c1c1c;
-  margin: 0.5rem 0;
-  padding: 1rem;
-  border-radius: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  margin-top: 20px;
+  gap: 20px;
 }
 
 video {
-  position: fixed;
-  bottom: 1rem;
-  width: 200px;
-  border: 2px solid white;
-  border-radius: 5px;
+  background: black;
+  border-radius: 8px;
+  object-fit: cover;
 }
 
 #localVideo {
-  left: 1rem;
+  width: 300px;
+  height: 225px;
+  border: 3px solid #3498db;
 }
 
 #remoteVideo {
-  right: 1rem;
+  width: 300px;
+  height: 225px;
+  border: 3px solid #2ecc71;
+}
+
+#hangupBtn {
+  background-color: #e74c3c;
+  border: none;
+  color: white;
+  font-size: 24px;
+  padding: 8px 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  position: absolute;
+  left: 20px;
+  top: 20px;
+  display: none; /* oculto por defecto */
+}
+
+#callArea {
+  position: relative;
 }
