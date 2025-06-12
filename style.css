@@ -1,0 +1,45 @@
+body {
+  font-family: sans-serif;
+  background: #111;
+  color: #fff;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+
+header {
+  padding: 20px;
+  background: #222;
+  box-shadow: 0 0 10px #000;
+}
+
+button {
+  background: #00c853;
+  border: none;
+  padding: 10px 20px;
+  font-size: 16px;
+  margin-top: 10px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+#roomsContainer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 20px;
+  gap: 10px;
+}
+
+.room {
+  background: #333;
+  padding: 10px;
+  border-radius: 10px;
+  width: 150px;
+  text-align: center;
+}
+
+.room video {
+  width: 100%;
+  border-radius: 8px;
+}
