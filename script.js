@@ -22,17 +22,26 @@ async function initCamera() {
 }
 
 async function getSalas() {
-  const res = await fetch(BIN_URL + "/latest", { headers: HEADERS });
-  const json = await res.json();
-  return json.record.salas || {};
+  try {
+    const res = await fetch(BIN_URL + "/latest", { headers: HEADERS });
+    const json = await res.json();
+    return json.record.salas || {};
+  } catch (e) {
+    console.error("Error al obtener salas:", e);
+    return {};
+  }
 }
 
 async function saveSalas(salas) {
-  await fetch(BIN_URL, {
-    method: "PUT",
-    headers: HEADERS,
-    body: JSON.stringify({ salas })
-  });
+  try {
+    await fetch(BIN_URL, {
+      method: "PUT",
+      headers: HEADERS,
+      body: JSON.stringify({ salas })
+    });
+  } catch (e) {
+    console.error("Error al guardar salas:", e);
+  }
 }
 
 async function refreshRooms() {
@@ -69,14 +78,19 @@ async function createRoom() {
   salas[id] = { users: 1 };
   await saveSalas(salas);
   connectAsHost(id);
+  await refreshRooms(); // actualizar la lista inmediatamente
 }
 
 async function joinRoom(id) {
+  await initCamera();
+
   const salas = await getSalas();
   if (!salas[id] || salas[id].users >= 2) return alert("Sala llena");
 
   salas[id].users = 2;
   await saveSalas(salas);
+
+  await refreshRooms(); // actualizar la lista inmediatamente
 
   peer = new Peer();
   peer.on("open", () => {
@@ -102,7 +116,10 @@ function connectAsHost(id) {
   });
 }
 
-// Refrescar lista de salas cada 5 segundos
+// Refrescar lista de salas cada 5 segundos para mantener sincronización
 setInterval(refreshRooms, 5000);
 
 createRoomBtn.onclick = createRoom;
+
+// Carga inicial de salas
+refreshRooms();
