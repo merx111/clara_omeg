@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VideoSalas</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>🎥 VideoSalas</h1>
+    <button id="createRoomBtn">Crear sala</button>
+  </header>
+
+  <main>
+    <div id="roomsContainer">
+      <!-- Aquí se generarán dinámicamente las salas -->
+    </div>
+  </main>
+
+  <video id="localVideo" autoplay muted playsinline hidden></video>
+  <video id="remoteVideo" autoplay playsinline hidden></video>
+
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
