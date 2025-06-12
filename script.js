@@ -1,126 +1,112 @@
-const API_KEY = "$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu";
-const BIN_ID = "684ae0ef8561e97a502305dd";
-const BIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-const HEADERS = {
-  "X-Master-Key": API_KEY,
-  "Content-Type": "application/json"
-};
+const API_KEY = "YOUR_JSONBIN_API_KEY";  // Cambia aquí tu API key
+const BIN_ID = "YOUR_JSONBIN_BIN_ID";    // Cambia aquí tu bin id
 
 const createRoomBtn = document.getElementById("createRoomBtn");
 const roomsContainer = document.getElementById("roomsContainer");
+
+const callArea = document.getElementById("callArea");
+const hangupBtn = document.getElementById("hangupBtn");
+
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
-const PING_INTERVAL = 10000;  // 10 segundos
-const TIMEOUT = 15000;        // 15 segundos para considerar desconectado
+let localStream = null;
+let peer = null;
+let currentCall = null;
 
-let localStream;
-let peer;
-let currentCall;
-let currentRoomId = null;
-
-// Id único de este cliente
 let clientId = Math.random().toString(36).substr(2, 9);
+let currentRoomId = null;
+let pingIntervalId = null;
 
-async function initCamera() {
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  localVideo.srcObject = localStream;
-  localVideo.hidden = false;
-}
+createRoomBtn.onclick = createRoom;
+
+hangupBtn.onclick = () => {
+  leaveCall();
+};
 
 async function getSalas() {
   try {
-    const res = await fetch(BIN_URL + "/latest", { headers: HEADERS });
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: {
+        "X-Master-Key": API_KEY,
+      },
+    });
+    if (!res.ok) throw new Error("Error leyendo JSONBin");
     const json = await res.json();
-    return json.record.salas || {};
+    return json.record || {};
   } catch (e) {
-    console.error("Error al obtener salas:", e);
+    console.error(e);
     return {};
   }
 }
 
 async function saveSalas(salas) {
   try {
-    await fetch(BIN_URL, {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
       method: "PUT",
-      headers: HEADERS,
-      body: JSON.stringify({ salas })
+      headers: {
+        "Content-Type": "application/json",
+        "X-Master-Key": API_KEY,
+        "X-Bin-Versioning": "false",
+      },
+      body: JSON.stringify(salas),
     });
+    if (!res.ok) throw new Error("Error guardando JSONBin");
   } catch (e) {
-    console.error("Error al guardar salas:", e);
+    console.error(e);
   }
 }
 
-// Envía ping para actualizar la hora de última actividad
-async function sendPing(roomId) {
-  if (!roomId) return;
-
-  const salas = await getSalas();
-  if (!salas[roomId]) return;
-
-  if (!salas[roomId].clients) salas[roomId].clients = {};
-
-  salas[roomId].clients[clientId] = Date.now();
-
-  // Elimina clientes inactivos
-  for (const cId in salas[roomId].clients) {
-    if (Date.now() - salas[roomId].clients[cId] > TIMEOUT) {
-      delete salas[roomId].clients[cId];
-    }
-  }
-
-  // Actualiza número de usuarios activos
-  salas[roomId].users = Object.keys(salas[roomId].clients).length;
-
-  // Si no hay usuarios, elimina sala
-  if (salas[roomId].users === 0) {
-    delete salas[roomId];
-  }
-
-  await saveSalas(salas);
-}
-
-// Refresca la lista y limpia salas inactivas
 async function refreshRooms() {
-  let salas = await getSalas();
+  const salas = await getSalas();
+  roomsContainer.innerHTML = "";
 
-  // Limpieza general de salas
-  const now = Date.now();
   for (const id in salas) {
     if (!salas[id].clients) salas[id].clients = {};
+    // Filtrar clientes que no han actualizado en 10 segundos
+    const now = Date.now();
     for (const cId in salas[id].clients) {
-      if (now - salas[id].clients[cId] > TIMEOUT) {
+      if (now - salas[id].clients[cId] > 10000) {
         delete salas[id].clients[cId];
       }
     }
     salas[id].users = Object.keys(salas[id].clients).length;
-    if (salas[id].users === 0) delete salas[id];
-  }
-  await saveSalas(salas);
 
-  roomsContainer.innerHTML = "";
-
-  for (const id in salas) {
-    const sala = salas[id];
-    const roomDiv = document.createElement("div");
-    roomDiv.className = "room";
-
-    const label = document.createElement("div");
-    label.textContent = `Sala ${id}`;
-
-    const btn = document.createElement("button");
-    if (sala.users >= 2) {
-      btn.textContent = "Llena ❌";
-      btn.disabled = true;
-    } else {
-      btn.textContent = "Unirse";
-      btn.onclick = () => joinRoom(id);
+    if (salas[id].users === 0) {
+      delete salas[id];
+      continue;
     }
 
-    roomDiv.appendChild(label);
-    roomDiv.appendChild(btn);
-    roomsContainer.appendChild(roomDiv);
+    // Guardamos limpieza
+    await saveSalas(salas);
+
+    if (salas[id].users < 2) {
+      const btn = document.createElement("button");
+      btn.className = "room";
+      btn.textContent = `Unirse a sala ${id} (${salas[id].users} usuarios)`;
+      btn.onclick = () => joinRoom(id);
+      roomsContainer.appendChild(btn);
+    }
   }
+}
+
+async function startPinging() {
+  if (!currentRoomId) return;
+  if (!pingIntervalId) {
+    pingIntervalId = setInterval(async () => {
+      const salas = await getSalas();
+      if (!salas[currentRoomId]) return clearInterval(pingIntervalId);
+      salas[currentRoomId].clients[clientId] = Date.now();
+      salas[currentRoomId].users = Object.keys(salas[currentRoomId].clients).length;
+      await saveSalas(salas);
+    }, 4000);
+  }
+}
+
+async function initCamera() {
+  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  localVideo.srcObject = localStream;
+  localVideo.hidden = false;
 }
 
 async function createRoom() {
@@ -137,6 +123,7 @@ async function createRoom() {
   connectAsHost(id);
   await refreshRooms();
   startPinging();
+  showCallUI();
 }
 
 async function joinRoom(id) {
@@ -154,6 +141,7 @@ async function joinRoom(id) {
 
   await refreshRooms();
   startPinging();
+  showCallUI();
 
   peer = new Peer();
   peer.on("open", () => {
@@ -162,6 +150,7 @@ async function joinRoom(id) {
       remoteVideo.srcObject = stream;
       remoteVideo.hidden = false;
     });
+    call.on("close", () => leaveCall());
     currentCall = call;
   });
 }
@@ -175,41 +164,66 @@ function connectAsHost(id) {
       remoteVideo.srcObject = stream;
       remoteVideo.hidden = false;
     });
+    call.on("close", () => leaveCall());
     currentCall = call;
   });
 }
 
-let pingIntervalId = null;
-
-function startPinging() {
-  if (pingIntervalId) clearInterval(pingIntervalId);
-  pingIntervalId = setInterval(() => sendPing(currentRoomId), PING_INTERVAL);
+function showCallUI() {
+  callArea.hidden = false;
+  createRoomBtn.disabled = true;
+  roomsContainer.style.display = "none";
+  hangupBtn.style.display = "block";
 }
 
-// Limpiar sala al salir de la web
-window.addEventListener("beforeunload", async () => {
-  if (!currentRoomId) return;
-  const salas = await getSalas();
-  if (!salas[currentRoomId]) return;
+function hideCallUI() {
+  callArea.hidden = true;
+  createRoomBtn.disabled = false;
+  roomsContainer.style.display = "block";
+  hangupBtn.style.display = "none";
+  localVideo.srcObject = null;
+  remoteVideo.srcObject = null;
+  localVideo.hidden = true;
+  remoteVideo.hidden = true;
+}
 
-  if (salas[currentRoomId].clients) {
-    delete salas[currentRoomId].clients[clientId];
+async function leaveCall() {
+  if (currentCall) {
+    currentCall.close();
+    currentCall = null;
   }
-  salas[currentRoomId].users = salas[currentRoomId].clients
-    ? Object.keys(salas[currentRoomId].clients).length
-    : 0;
-
-  if (salas[currentRoomId].users === 0) {
-    delete salas[currentRoomId];
+  if (peer) {
+    peer.destroy();
+    peer = null;
   }
 
-  await saveSalas(salas);
+  if (currentRoomId) {
+    const salas = await getSalas();
+    if (salas[currentRoomId] && salas[currentRoomId].clients) {
+      delete salas[currentRoomId].clients[clientId];
+      salas[currentRoomId].users = Object.keys(salas[currentRoomId].clients).length;
+      if (salas[currentRoomId].users === 0) delete salas[currentRoomId];
+      await saveSalas(salas);
+    }
+    currentRoomId = null;
+  }
+  stopPinging();
+  hideCallUI();
+  await refreshRooms();
+}
+
+function stopPinging() {
+  if (pingIntervalId) {
+    clearInterval(pingIntervalId);
+    pingIntervalId = null;
+  }
+}
+
+window.addEventListener("beforeunload", async (e) => {
+  if (currentRoomId) {
+    await leaveCall();
+  }
 });
 
-// Refrescar lista cada 5 segundos para mantener sincronización
-setInterval(refreshRooms, 5000);
-
-createRoomBtn.onclick = createRoom;
-
-// Carga inicial
+// Inicio
 refreshRooms();
