@@ -2,24 +2,22 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VideoSalas JSONBin</title>
+  <title>Video Chat Simple</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <h1>🎥 VideoSalas</h1>
-    <button id="createRoomBtn">Crear sala</button>
-  </header>
+  <button id="createRoomBtn">Crear Sala</button>
+  <div id="roomsContainer"></div>
 
-  <main>
-    <div id="roomsContainer"></div>
-  </main>
+  <div id="callArea" hidden>
+    <button id="hangupBtn" title="Salir de la llamada">✖</button>
+    <div id="videoContainer">
+      <video id="localVideo" autoplay muted></video>
+      <video id="remoteVideo" autoplay></video>
+    </div>
+  </div>
 
-  <video id="localVideo" autoplay muted playsinline hidden></video>
-  <video id="remoteVideo" autoplay playsinline hidden></video>
-
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
