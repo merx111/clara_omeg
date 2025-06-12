@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>clara omeg</title>
-  <!-- Fuente bonita -->
   <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <style>
@@ -73,15 +72,26 @@
       color: #eee;
     }
     .hidden { display: none; }
+    #online-count {
+      margin-top: 1rem;
+      color: #0f0;
+    }
   </style>
 </head>
 <body>
-
   <div id="status">Inicializando…</div>
   <div id="log"></div>
 
+  <!-- LOGIN/REGISTER -->
+  <div id="auth-screen">
+    <h1>clara omeg</h1>
+    <input type="text" id="user-input" placeholder="Usuario" autocomplete="username"/>
+    <input type="password" id="pass-input" placeholder="Contraseña" autocomplete="current-password"/>
+    <button id="login-btn">Entrar / Registrar</button>
+  </div>
+
   <!-- PANTALLA INICIAL -->
-  <div id="start-screen">
+  <div id="start-screen" class="hidden">
     <h1>clara omeg</h1>
     <video id="video-local-start" autoplay muted></video>
     <div id="filters">
@@ -97,6 +107,8 @@
       </select>
     </div>
     <button id="btnStart">Comenzar</button>
+    <button id="logout-btn" style="background:#555;margin-top:2rem;">Salir</button>
+    <div id="online-count"></div>
   </div>
 
   <!-- PANTALLA DE CHAT -->
@@ -108,188 +120,232 @@
     <button id="btnSkip" disabled>Skip</button>
   </div>
 
-  <script>
-    // — CONFIG JSONBin —
-    const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
-    const BIN_ID  = '684abe418561e97a5022f0ef';
+<script>
+const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
+const BIN_ID = '684abe418561e97a5022f0ef'; // Un solo bin para todo
 
-    // — DOM —
-    const status       = document.getElementById('status');
-    const logDiv       = document.getElementById('log');
-    const startScreen  = document.getElementById('start-screen');
-    const chatScreen   = document.getElementById('chat-screen');
-    const vidStart     = document.getElementById('video-local-start');
-    const vidLocal     = document.getElementById('video-local');
-    const vidRemote    = document.getElementById('video-remote');
-    const filterSelect = document.getElementById('filter-select');
-    const btnStart     = document.getElementById('btnStart');
-    const btnSkip      = document.getElementById('btnSkip');
+// Estado y selectores
+let usuario = localStorage.getItem('clara_omeg_user') || '';
+const status       = document.getElementById('status');
+const logDiv       = document.getElementById('log');
+const startScreen  = document.getElementById('start-screen');
+const chatScreen   = document.getElementById('chat-screen');
+const vidStart     = document.getElementById('video-local-start');
+const vidLocal     = document.getElementById('video-local');
+const vidRemote    = document.getElementById('video-remote');
+const filterSelect = document.getElementById('filter-select');
+const btnStart     = document.getElementById('btnStart');
+const btnSkip      = document.getElementById('btnSkip');
+const authScreen   = document.getElementById('auth-screen');
+const userInput    = document.getElementById('user-input');
+const passInput    = document.getElementById('pass-input');
+const loginBtn     = document.getElementById('login-btn');
+const logoutBtn    = document.getElementById('logout-btn');
+const onlineCount  = document.getElementById('online-count');
 
-    // — P2P & STATE —
-    const peer       = new Peer();
-    let myID         = '';
-    let localStream  = null;
-    let currentCall  = null;
+const peer       = new Peer();
+let myID         = '';
+let localStream  = null;
+let currentCall  = null;
 
-    function setStatus(txt) {
-      status.textContent = txt;
-    }
-    function log(txt, isError = true) {
-      logDiv.textContent = txt;
-      console[isError ? 'error' : 'log'](txt);
-    }
+function setStatus(txt) { status.textContent = txt; }
+function log(txt, isError = true) {
+  logDiv.textContent = txt;
+  console[isError ? 'error' : 'log'](txt);
+}
+function updateAuthUI() {
+  if (usuario) {
+    authScreen.classList.add('hidden');
+    startScreen.classList.remove('hidden');
+  } else {
+    authScreen.classList.remove('hidden');
+    startScreen.classList.add('hidden');
+    chatScreen.classList.add('hidden');
+  }
+}
 
-    // — JSONBin helpers —
-    async function fetchBin() {
-      setStatus('Obteniendo cola…');
-      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-        headers: {'X-Master-Key': API_KEY}
-      });
-      if (!res.ok) {
-        log('Error fetchBin ' + res.status);
-        return [];
-      }
-      const { record } = await res.json();
-      return Array.isArray(record) ? record : [];
-    }
-    async function updateBin(list) {
-      setStatus('Actualizando cola…');
-      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Master-Key': API_KEY
-        },
-        body: JSON.stringify(list)
-      });
-      if (!res.ok) {
-        log('Error updateBin ' + res.status);
-      }
-    }
+// --- JSONBIN helpers (guarda {queue:[], users_online:[]} en un solo bin) ---
+async function fetchBin() {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+    headers: {'X-Master-Key': API_KEY}
+  });
+  if (!res.ok) return {queue:[], users_online:[]};
+  const { record } = await res.json();
+  return {
+    queue: Array.isArray(record.queue) ? record.queue : [],
+    users_online: Array.isArray(record.users_online) ? record.users_online : []
+  };
+}
+async function updateBin(newData) {
+  const data = await fetchBin();
+  const merged = {...data, ...newData};
+  await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
+    body: JSON.stringify(merged)
+  });
+}
 
-    // — QUEUE LOGIC —
-    async function enterQueue() {
-      const list = await fetchBin();
-      if (!list.includes(myID)) {
-        list.push(myID);
-        await updateBin(list);
-      }
-      setStatus(`En cola. Usuarios totales: ${ (await fetchBin()).length }`);
-    }
-    async function leaveQueue() {
-      try {
-        const list = await fetchBin();
-        const filtered = list.filter(id => id !== myID);
-        // Si estamos saliendo/unload, usar sendBeacon
-        if (navigator.sendBeacon && window._isUnloading) {
-          const url = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-          const data = JSON.stringify(filtered);
-          navigator.sendBeacon(url, data);
-        } else {
-          await updateBin(filtered);
-        }
-        setStatus('Saliste de la cola');
-      } catch (e) {
-        console.error('Error leaveQueue:', e);
-      }
-    }
-    async function joinRandom() {
-      const list = await fetchBin();
-      const others = list.filter(id => id !== myID);
-      setStatus(`Usuarios en espera: ${others.length}`);
-      if (!others.length) {
-        log('Nadie más conectado', false);
-        return;
-      }
-      const peerID = others[Math.floor(Math.random() * others.length)];
-      startCall(peerID);
-    }
+// --- USERS ONLINE ---
+async function userOnline(username) {
+  const {users_online} = await fetchBin();
+  if (!users_online.includes(username)) {
+    users_online.push(username);
+    await updateBin({users_online});
+  }
+}
+async function userOffline(username) {
+  const {users_online} = await fetchBin();
+  const filtered = users_online.filter(u => u !== username);
+  await updateBin({users_online: filtered});
+}
+async function showOnlineCount() {
+  const {users_online} = await fetchBin();
+  onlineCount.textContent = `Usuarios conectados: ${users_online.length}`;
+}
+setInterval(showOnlineCount, 5000);
 
-    // — P2P CALLS —
-    function startCall(remoteID) {
-      log(`Llamando a ${remoteID}`, false);
-      if (currentCall) currentCall.close();
-      currentCall = peer.call(remoteID, localStream);
-      setupCall(currentCall);
-      btnSkip.disabled = false;
-    }
-    function setupCall(call) {
-      call.on('stream', stream => {
-        vidRemote.srcObject = stream;
-        setStatus('Conectado con ' + call.peer);
-      });
-      call.on('close', cleanupCall);
-      call.on('error', err => {
-        log('Error en la llamada: ' + err, true);
-        cleanupCall();
-      });
-    }
-    function cleanupCall() {
-      vidRemote.srcObject = null;
-      currentCall = null;
-      btnSkip.disabled = true;
-      setStatus('Conexión finalizada');
-    }
+// --- LOGIN/REGISTER ---
+loginBtn.onclick = async () => {
+  const u = userInput.value.trim();
+  const p = passInput.value.trim();
+  if (!u || !p) return log('Introduce usuario y contraseña');
+  usuario = u;
+  localStorage.setItem('clara_omeg_user', usuario);
+  updateAuthUI();
+  await userOnline(usuario);
+  setStatus('Bienvenido, ' + usuario);
+  showOnlineCount();
+};
 
-    // — PEERJS EVENTS —
-    peer.on('open', id => {
-      myID = id;
-      setStatus('Tu ID: ' + id);
-    });
-    peer.on('call', call => {
-      log('Llamada entrante de ' + call.peer, false);
-      if (currentCall) call.close();
-      currentCall = call;
-      call.answer(localStream);
-      setupCall(call);
-      btnSkip.disabled = false;
-    });
+// --- LOGOUT/Borrar usuario online ---
+logoutBtn.onclick = async () => {
+  await userOffline(usuario);
+  localStorage.removeItem('clara_omeg_user');
+  usuario = '';
+  updateAuthUI();
+  location.reload();
+};
 
-    // — LOCAL STREAM & FILTERS —
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        localStream = stream;
-        vidStart.srcObject = stream;
-        vidLocal.srcObject  = stream;
-        setStatus('Stream listo. Tu ID: ' + myID);
-      })
-      .catch(err => {
-        log('No access: ' + err.message);
-        alert('Permite cámara y micrófono.');
-      });
+// --- P2P & cola ---
+peer.on('open', id => { myID = id; setStatus('Tu ID: ' + id); });
 
-    filterSelect.addEventListener('change', () => {
-      const style1 = vidStart.style;
-      const style2 = vidLocal.style;
-      const val = filterSelect.value;
-      if (val === 'mirror') {
-        [style1, style2].forEach(s => { s.transform = 'scaleX(-1)'; s.filter = ''; });
-      } else if (val === 'zoom') {
-        [style1, style2].forEach(s => { s.transform = 'scale(2)'; s.transformOrigin = 'center center'; s.filter = ''; });
-      } else {
-        [style1, style2].forEach(s => { s.transform = ''; s.filter = val; });
-      }
-    });
+async function enterQueue() {
+  const {queue} = await fetchBin();
+  if (!queue.includes(usuario)) {
+    queue.push(usuario);
+    await updateBin({queue});
+  }
+  setStatus(`En cola. Usuarios totales: ${ (await fetchBin()).queue.length }`);
+}
+async function leaveQueue() {
+  try {
+    const {queue} = await fetchBin();
+    const filtered = queue.filter(id => id !== usuario);
+    await updateBin({queue: filtered});
+    setStatus('Saliste de la cola');
+  } catch (e) {
+    console.error('Error leaveQueue:', e);
+  }
+}
+async function joinRandom() {
+  const {queue, users_online} = await fetchBin();
+  const others = queue.filter(u => u !== usuario && users_online.includes(u));
+  setStatus(`Usuarios en espera: ${others.length}`);
+  if (!others.length) {
+    log('Nadie más conectado', false);
+    return;
+  }
+  const peerUser = others[Math.floor(Math.random() * others.length)];
+  startCall(peerUser);
+}
 
-    // — BUTTONS & EVENTS —
-    btnStart.onclick = async () => {
-      btnStart.disabled = true;
-      startScreen.classList.add('hidden');
-      chatScreen.classList.remove('hidden');
-      await enterQueue();
-      await joinRandom();
-    };
-    btnSkip.onclick = async () => {
-      cleanupCall();
-      await leaveQueue();
-      await enterQueue();
-      await joinRandom();
-    };
+// --- VIDEO/FILTROS ---
+navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+  .then(stream => {
+    localStream = stream;
+    vidStart.srcObject = stream;
+    vidLocal.srcObject  = stream;
+    setStatus('Stream listo. Tu ID: ' + myID);
+  })
+  .catch(err => {
+    log('No access: ' + err.message);
+    alert('Permite cámara y micrófono.');
+  });
 
-    // — Garantizar salida de la cola al cerrar/navegar —
-    window.addEventListener('beforeunload', () => { window._isUnloading = true; leaveQueue(); });
-    window.addEventListener('pagehide',    () => { window._isUnloading = true; leaveQueue(); });
-    window.addEventListener('unload',      () => { window._isUnloading = true; leaveQueue(); });
-  </script>
+filterSelect.addEventListener('change', () => {
+  const style1 = vidStart.style;
+  const style2 = vidLocal.style;
+  const val = filterSelect.value;
+  if (val === 'mirror') {
+    [style1, style2].forEach(s => { s.transform = 'scaleX(-1)'; s.filter = ''; });
+  } else if (val === 'zoom') {
+    [style1, style2].forEach(s => { s.transform = 'scale(2)'; s.transformOrigin = 'center center'; s.filter = ''; });
+  } else {
+    [style1, style2].forEach(s => { s.transform = ''; s.filter = val; });
+  }
+});
+
+// --- BOTONES ---
+btnStart.onclick = async () => {
+  btnStart.disabled = true;
+  startScreen.classList.add('hidden');
+  chatScreen.classList.remove('hidden');
+  await enterQueue();
+  await joinRandom();
+};
+btnSkip.onclick = async () => {
+  cleanupCall();
+  await leaveQueue();
+  await enterQueue();
+  await joinRandom();
+};
+
+// --- P2P logic ---
+function startCall(remoteID) {
+  log(`Llamando a ${remoteID}`, false);
+  if (currentCall) currentCall.close();
+  currentCall = peer.call(remoteID, localStream);
+  setupCall(currentCall);
+  btnSkip.disabled = false;
+}
+function setupCall(call) {
+  call.on('stream', stream => {
+    vidRemote.srcObject = stream;
+    setStatus('Conectado con ' + call.peer);
+  });
+  call.on('close', cleanupCall);
+  call.on('error', err => {
+    log('Error en la llamada: ' + err, true);
+    cleanupCall();
+  });
+}
+function cleanupCall() {
+  vidRemote.srcObject = null;
+  currentCall = null;
+  btnSkip.disabled = true;
+  setStatus('Conexión finalizada');
+}
+peer.on('call', call => {
+  log('Llamada entrante de ' + call.peer, false);
+  if (currentCall) call.close();
+  currentCall = call;
+  call.answer(localStream);
+  setupCall(call);
+  btnSkip.disabled = false;
+});
+
+// --- Salida: elimina usuario de online y cola ---
+window.addEventListener('beforeunload', () => { userOffline(usuario); leaveQueue(); });
+window.addEventListener('pagehide',    () => { userOffline(usuario); leaveQueue(); });
+window.addEventListener('unload',      () => { userOffline(usuario); leaveQueue(); });
+
+// Mostrar online al cargar si ya está logueado
+if (usuario) {
+  userOnline(usuario);
+  showOnlineCount();
+}
+updateAuthUI();
+</script>
 </body>
 </html>
