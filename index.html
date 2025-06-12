@@ -1,360 +1,122 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>clara omeg</title>
-  <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
-  <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <title>P2P Omegle</title>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: #111;
-      color: #eee;
-      font-family: sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      height: 100vh;
-      overflow: hidden;
-      text-align: center;
-    }
-    #status { margin: .5rem; font-size: .9rem; color: #ccc; }
-    #log    { margin: .5rem; font-size: .9rem; color: #f88; min-height: 1.2rem; }
-    h1 {
-      font-family: 'Pacifico', cursive;
-      font-size: 3rem;
-      margin: 1rem 0;
-    }
-    video {
-      background: black;
-      border-radius: 8px;
-      transition: filter .3s, transform .3s;
-    }
-    #start-screen video,
-    #chat-screen video {
-      width: 80vw;
-      max-width: 640px;
-      height: auto;
-    }
-    #chat-screen #videos {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    button {
-      padding: 1rem 2rem;
-      margin: .5rem;
-      font-size: 1.1rem;
-      border: none;
-      border-radius: 8px;
-      background: crimson;
-      color: white;
-      cursor: pointer;
-    }
-    button:disabled {
-      background: #555;
-      cursor: default;
-    }
-    #filters {
-      margin-top: 1rem;
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-    }
-    select {
-      padding: .4rem;
-      font-size: 1rem;
-      border-radius: 4px;
-      border: none;
-      background: #333;
-      color: #eee;
-    }
-    .hidden { display: none; }
-    #online-count {
-      margin-top: 1rem;
-      color: #0f0;
-    }
+    body { font-family: sans-serif; background: #111; color: #0f0; padding: 20px; }
+    #chat { border: 1px solid #0f0; height: 300px; overflow: auto; padding: 10px; margin-bottom: 10px; }
+    input { width: 100%; padding: 10px; }
   </style>
 </head>
 <body>
-  <div id="status">Inicializando…</div>
-  <div id="log"></div>
+  <h1>P2P Omegle</h1>
+  <div id="chat"></div>
+  <input id="message" placeholder="Escribe y presiona Enter..." />
+  <script>
+    const JSONBIN_SECRET = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
+    const BIN_ID = '684ae0ef8561e97a502305dd'; // Puedes generarlo aleatoriamente para cada par
+    const isCaller = location.hash !== "#join";
 
-  <!-- LOGIN/REGISTER -->
-  <div id="auth-screen">
-    <h1>clara omeg</h1>
-    <input type="text" id="user-input" placeholder="Usuario" autocomplete="username"/>
-    <input type="password" id="pass-input" placeholder="Contraseña" autocomplete="current-password"/>
-    <button id="login-btn">Entrar / Registrar</button>
-  </div>
+    const pc = new RTCPeerConnection();
+    let channel;
 
-  <!-- PANTALLA INICIAL -->
-  <div id="start-screen" class="hidden">
-    <h1>clara omeg</h1>
-    <video id="video-local-start" autoplay muted></video>
-    <div id="filters">
-      <label for="filter-select">Filtro:</label>
-      <select id="filter-select">
-        <option value="none">Ninguno</option>
-        <option value="grayscale(100%)">Escala de grises</option>
-        <option value="sepia(100%)">Sepia</option>
-        <option value="invert(100%)">Invertir</option>
-        <option value="contrast(200%)">Contraste ↑</option>
-        <option value="mirror">Espejo</option>
-        <option value="zoom">Zoom (cara grande)</option>
-      </select>
-    </div>
-    <button id="btnStart">Comenzar</button>
-    <button id="logout-btn" style="background:#555;margin-top:2rem;">Salir</button>
-    <div id="online-count"></div>
-  </div>
+    const chat = document.getElementById('chat');
+    const input = document.getElementById('message');
 
-  <!-- PANTALLA DE CHAT -->
-  <div id="chat-screen" class="hidden">
-    <div id="videos">
-      <video id="video-local" autoplay muted></video>
-      <video id="video-remote" autoplay></video>
-    </div>
-    <button id="btnSkip" disabled>Skip</button>
-  </div>
+    function log(msg) {
+      chat.innerHTML += `<div>${msg}</div>`;
+      chat.scrollTop = chat.scrollHeight;
+    }
 
-<script>
-const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
-const BIN_ID = '684abe418561e97a5022f0ef';
-const HEARTBEAT_INTERVAL = 7000; // ms
-const DISCONNECT_TIMEOUT = 20000; // ms
+    // Enviar y recibir mensajes
+    function setupChannelEvents(c) {
+      c.onmessage = e => log("Stranger: " + e.data);
+      input.onkeypress = e => {
+        if (e.key === "Enter") {
+          log("You: " + input.value);
+          c.send(input.value);
+          input.value = "";
+        }
+      };
+    }
 
-let usuario = localStorage.getItem('clara_omeg_user') || '';
-let peer = null;
-let myID = '';
-let localStream = null;
-let currentCall = null;
-let heartbeatTimer = null;
+    // Señalización via JSONBin
+    async function writeBin(data) {
+      await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Master-Key": JSONBIN_SECRET
+        },
+        body: JSON.stringify(data)
+      });
+    }
 
-const status       = document.getElementById('status');
-const logDiv       = document.getElementById('log');
-const startScreen  = document.getElementById('start-screen');
-const chatScreen   = document.getElementById('chat-screen');
-const vidStart     = document.getElementById('video-local-start');
-const vidLocal     = document.getElementById('video-local');
-const vidRemote    = document.getElementById('video-remote');
-const filterSelect = document.getElementById('filter-select');
-const btnStart     = document.getElementById('btnStart');
-const btnSkip      = document.getElementById('btnSkip');
-const authScreen   = document.getElementById('auth-screen');
-const userInput    = document.getElementById('user-input');
-const passInput    = document.getElementById('pass-input');
-const loginBtn     = document.getElementById('login-btn');
-const logoutBtn    = document.getElementById('logout-btn');
-const onlineCount  = document.getElementById('online-count');
+    async function readBin() {
+      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+        headers: { "X-Master-Key": JSONBIN_SECRET }
+      });
+      const { record } = await res.json();
+      return record;
+    }
 
-function setStatus(txt) { status.textContent = txt; }
-function log(txt, isError = true) {
-  logDiv.textContent = txt;
-  console[isError ? 'error' : 'log'](txt);
-}
-function updateAuthUI() {
-  if (usuario) {
-    authScreen.classList.add('hidden');
-    startScreen.classList.remove('hidden');
-  } else {
-    authScreen.classList.remove('hidden');
-    startScreen.classList.add('hidden');
-    chatScreen.classList.add('hidden');
-  }
-}
+    async function waitForAnswer() {
+      while (true) {
+        const bin = await readBin();
+        if (bin.answer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(bin.answer));
+          break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
 
-// --- JSONBIN helpers ---
-async function fetchBin() {
-  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-    headers: {'X-Master-Key': API_KEY}
-  });
-  if (!res.ok) return [];
-  const { record } = await res.json();
-  return Array.isArray(record) ? record : [];
-}
-async function updateBin(list) {
-  await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
-    body: JSON.stringify(list)
-  });
-}
+    async function waitForOffer() {
+      while (true) {
+        const bin = await readBin();
+        if (bin.offer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(bin.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await writeBin({ ...bin, answer });
+          break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
 
-// --- Heartbeat: mantener usuario en la lista ---
-async function heartbeat() {
-  if (!usuario || !myID) return;
-  let list = await fetchBin();
-  const now = Date.now();
-  // Eliminar desconectados
-  list = list.filter(u => now - (u.ts || 0) < DISCONNECT_TIMEOUT);
-  // Actualizar o agregarme
-  const idx = list.findIndex(u => u.user === usuario);
-  if (idx >= 0) {
-    list[idx].peerId = myID;
-    list[idx].ts = now;
-  } else {
-    list.push({ user: usuario, peerId: myID, ts: now });
-  }
-  await updateBin(list);
-  showOnlineCount(list);
-}
-function startHeartbeat() {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  heartbeatTimer = setInterval(heartbeat, HEARTBEAT_INTERVAL);
-}
-async function removeMeFromList() {
-  let list = await fetchBin();
-  list = list.filter(u => u.user !== usuario);
-  await updateBin(list);
-}
-async function showOnlineCount(list=null) {
-  if (!list) list = await fetchBin();
-  // Solo los que están activos
-  const now = Date.now();
-  const active = list.filter(u => now - (u.ts || 0) < DISCONNECT_TIMEOUT);
-  onlineCount.textContent = `Usuarios conectados: ${active.length}`;
-}
+    if (isCaller) {
+      log("Esperando a un desconocido...");
 
-// --- LOGIN/REGISTER ---
-loginBtn.onclick = async () => {
-  const u = userInput.value.trim();
-  const p = passInput.value.trim();
-  if (!u || !p) return log('Introduce usuario y contraseña');
-  usuario = u;
-  localStorage.setItem('clara_omeg_user', usuario);
-  updateAuthUI();
-  setStatus('Bienvenido, ' + usuario);
-  if (peer && peer.id) {
-    myID = peer.id;
-    await heartbeat();
-    startHeartbeat();
-  }
-  showOnlineCount();
-};
+      channel = pc.createDataChannel("chat");
+      setupChannelEvents(channel);
 
-// --- LOGOUT/Borrar usuario online ---
-logoutBtn.onclick = async () => {
-  await removeMeFromList();
-  localStorage.removeItem('clara_omeg_user');
-  usuario = '';
-  updateAuthUI();
-  location.reload();
-};
+      pc.onicecandidate = async e => {
+        if (e.candidate === null) {
+          await writeBin({ offer: pc.localDescription });
+        }
+      };
 
-// --- PeerJS y vídeo ---
-peer = new Peer();
-peer.on('open', async id => {
-  myID = id;
-  setStatus('Tu ID: ' + id);
-  if (usuario) {
-    await heartbeat();
-    startHeartbeat();
-  }
-});
-navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-  .then(stream => {
-    localStream = stream;
-    vidStart.srcObject = stream;
-    vidLocal.srcObject  = stream;
-    setStatus('Stream listo');
-  })
-  .catch(err => {
-    log('No access: ' + err.message);
-    alert('Permite cámara y micrófono.');
-  });
+      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+      waitForAnswer();
+    } else {
+      log("Conectando con un extraño...");
 
-// --- Filtros vídeo ---
-filterSelect.addEventListener('change', () => {
-  const style1 = vidStart.style;
-  const style2 = vidLocal.style;
-  const val = filterSelect.value;
-  if (val === 'mirror') {
-    [style1, style2].forEach(s => { s.transform = 'scaleX(-1)'; s.filter = ''; });
-  } else if (val === 'zoom') {
-    [style1, style2].forEach(s => { s.transform = 'scale(2)'; s.transformOrigin = 'center center'; s.filter = ''; });
-  } else {
-    [style1, style2].forEach(s => { s.transform = ''; s.filter = val; });
-  }
-});
+      pc.ondatachannel = e => {
+        channel = e.channel;
+        setupChannelEvents(channel);
+      };
 
-// --- Emparejamiento ---
-btnStart.onclick = async () => {
-  btnStart.disabled = true;
-  startScreen.classList.add('hidden');
-  chatScreen.classList.remove('hidden');
-  await heartbeat();
-  startHeartbeat();
-  await joinRandom();
-};
-btnSkip.onclick = async () => {
-  cleanupCall();
-  await joinRandom();
-};
+      pc.onicecandidate = async e => {
+        if (e.candidate === null) {
+          const existing = await readBin();
+          await writeBin({ ...existing, answer: pc.localDescription });
+        }
+      };
 
-async function joinRandom() {
-  let list = await fetchBin();
-  const now = Date.now();
-  // Solo usuarios activos y que no sean yo
-  const others = list.filter(u => u.user !== usuario && (now - (u.ts || 0)) < DISCONNECT_TIMEOUT);
-  showOnlineCount(list);
-  if (!others.length) {
-    log('Nadie más conectado', false);
-    setStatus('Nadie más conectado');
-    return;
-  }
-  // Elige uno al azar y llama por su peerId
-  const picked = others[Math.floor(Math.random() * others.length)];
-  startCall(picked.peerId);
-}
-
-function startCall(remotePeerId) {
-  log(`Llamando a ${remotePeerId}`, false);
-  if (currentCall) currentCall.close();
-  currentCall = peer.call(remotePeerId, localStream);
-  setupCall(currentCall);
-  btnSkip.disabled = false;
-}
-function setupCall(call) {
-  call.on('stream', stream => {
-    vidRemote.srcObject = stream;
-    setStatus('Conectado');
-  });
-  call.on('close', cleanupCall);
-  call.on('error', err => {
-    log('Error en la llamada: ' + err, true);
-    cleanupCall();
-  });
-}
-function cleanupCall() {
-  vidRemote.srcObject = null;
-  currentCall = null;
-  btnSkip.disabled = true;
-  setStatus('Conexión finalizada');
-}
-peer.on('call', call => {
-  log('Llamada entrante', false);
-  if (currentCall) call.close();
-  currentCall = call;
-  call.answer(localStream);
-  setupCall(call);
-  btnSkip.disabled = false;
-});
-
-// --- Salida limpia ---
-window.addEventListener('beforeunload', () => { if(usuario) removeMeFromList(); });
-window.addEventListener('pagehide',    () => { if(usuario) removeMeFromList(); });
-window.addEventListener('unload',      () => { if(usuario) removeMeFromList(); });
-
-if (usuario && peer && peer.id) {
-  myID = peer.id;
-  heartbeat();
-  startHeartbeat();
-}
-updateAuthUI();
-showOnlineCount();
-</script>
+      waitForOffer();
+    }
+  </script>
 </body>
 </html>
