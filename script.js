@@ -11,9 +11,16 @@ const roomsContainer = document.getElementById("roomsContainer");
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
+const PING_INTERVAL = 10000;  // 10 segundos
+const TIMEOUT = 15000;        // 15 segundos para considerar desconectado
+
 let localStream;
 let peer;
 let currentCall;
+let currentRoomId = null;
+
+// Id único de este cliente
+let clientId = Math.random().toString(36).substr(2, 9);
 
 async function initCamera() {
   localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -44,8 +51,53 @@ async function saveSalas(salas) {
   }
 }
 
-async function refreshRooms() {
+// Envía ping para actualizar la hora de última actividad
+async function sendPing(roomId) {
+  if (!roomId) return;
+
   const salas = await getSalas();
+  if (!salas[roomId]) return;
+
+  if (!salas[roomId].clients) salas[roomId].clients = {};
+
+  salas[roomId].clients[clientId] = Date.now();
+
+  // Elimina clientes inactivos
+  for (const cId in salas[roomId].clients) {
+    if (Date.now() - salas[roomId].clients[cId] > TIMEOUT) {
+      delete salas[roomId].clients[cId];
+    }
+  }
+
+  // Actualiza número de usuarios activos
+  salas[roomId].users = Object.keys(salas[roomId].clients).length;
+
+  // Si no hay usuarios, elimina sala
+  if (salas[roomId].users === 0) {
+    delete salas[roomId];
+  }
+
+  await saveSalas(salas);
+}
+
+// Refresca la lista y limpia salas inactivas
+async function refreshRooms() {
+  let salas = await getSalas();
+
+  // Limpieza general de salas
+  const now = Date.now();
+  for (const id in salas) {
+    if (!salas[id].clients) salas[id].clients = {};
+    for (const cId in salas[id].clients) {
+      if (now - salas[id].clients[cId] > TIMEOUT) {
+        delete salas[id].clients[cId];
+      }
+    }
+    salas[id].users = Object.keys(salas[id].clients).length;
+    if (salas[id].users === 0) delete salas[id];
+  }
+  await saveSalas(salas);
+
   roomsContainer.innerHTML = "";
 
   for (const id in salas) {
@@ -75,10 +127,16 @@ async function createRoom() {
   await initCamera();
   const id = Math.random().toString(36).substr(2, 6);
   const salas = await getSalas();
-  salas[id] = { users: 1 };
+
+  salas[id] = {
+    users: 1,
+    clients: { [clientId]: Date.now() }
+  };
   await saveSalas(salas);
+  currentRoomId = id;
   connectAsHost(id);
-  await refreshRooms(); // actualizar la lista inmediatamente
+  await refreshRooms();
+  startPinging();
 }
 
 async function joinRoom(id) {
@@ -87,10 +145,15 @@ async function joinRoom(id) {
   const salas = await getSalas();
   if (!salas[id] || salas[id].users >= 2) return alert("Sala llena");
 
-  salas[id].users = 2;
+  if (!salas[id].clients) salas[id].clients = {};
+  salas[id].clients[clientId] = Date.now();
+  salas[id].users = Object.keys(salas[id].clients).length;
   await saveSalas(salas);
 
-  await refreshRooms(); // actualizar la lista inmediatamente
+  currentRoomId = id;
+
+  await refreshRooms();
+  startPinging();
 
   peer = new Peer();
   peer.on("open", () => {
@@ -116,10 +179,37 @@ function connectAsHost(id) {
   });
 }
 
-// Refrescar lista de salas cada 5 segundos para mantener sincronización
+let pingIntervalId = null;
+
+function startPinging() {
+  if (pingIntervalId) clearInterval(pingIntervalId);
+  pingIntervalId = setInterval(() => sendPing(currentRoomId), PING_INTERVAL);
+}
+
+// Limpiar sala al salir de la web
+window.addEventListener("beforeunload", async () => {
+  if (!currentRoomId) return;
+  const salas = await getSalas();
+  if (!salas[currentRoomId]) return;
+
+  if (salas[currentRoomId].clients) {
+    delete salas[currentRoomId].clients[clientId];
+  }
+  salas[currentRoomId].users = salas[currentRoomId].clients
+    ? Object.keys(salas[currentRoomId].clients).length
+    : 0;
+
+  if (salas[currentRoomId].users === 0) {
+    delete salas[currentRoomId];
+  }
+
+  await saveSalas(salas);
+});
+
+// Refrescar lista cada 5 segundos para mantener sincronización
 setInterval(refreshRooms, 5000);
 
 createRoomBtn.onclick = createRoom;
 
-// Carga inicial de salas
+// Carga inicial
 refreshRooms();
