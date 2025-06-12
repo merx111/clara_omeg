@@ -122,10 +122,17 @@
 
 <script>
 const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
-const BIN_ID = '684abe418561e97a5022f0ef'; // Un solo bin para todo
+const BIN_ID = '684abe418561e97a5022f0ef';
+const HEARTBEAT_INTERVAL = 7000; // ms
+const DISCONNECT_TIMEOUT = 20000; // ms
 
-// Estado y selectores
 let usuario = localStorage.getItem('clara_omeg_user') || '';
+let peer = null;
+let myID = '';
+let localStream = null;
+let currentCall = null;
+let heartbeatTimer = null;
+
 const status       = document.getElementById('status');
 const logDiv       = document.getElementById('log');
 const startScreen  = document.getElementById('start-screen');
@@ -143,11 +150,6 @@ const loginBtn     = document.getElementById('login-btn');
 const logoutBtn    = document.getElementById('logout-btn');
 const onlineCount  = document.getElementById('online-count');
 
-const peer       = new Peer();
-let myID         = '';
-let localStream  = null;
-let currentCall  = null;
-
 function setStatus(txt) { status.textContent = txt; }
 function log(txt, isError = true) {
   logDiv.textContent = txt;
@@ -164,46 +166,57 @@ function updateAuthUI() {
   }
 }
 
-// --- JSONBIN helpers (guarda {queue:[], users_online:[]} en un solo bin) ---
+// --- JSONBIN helpers ---
 async function fetchBin() {
   const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
     headers: {'X-Master-Key': API_KEY}
   });
-  if (!res.ok) return {queue:[], users_online:[]};
+  if (!res.ok) return [];
   const { record } = await res.json();
-  return {
-    queue: Array.isArray(record.queue) ? record.queue : [],
-    users_online: Array.isArray(record.users_online) ? record.users_online : []
-  };
+  return Array.isArray(record) ? record : [];
 }
-async function updateBin(newData) {
-  const data = await fetchBin();
-  const merged = {...data, ...newData};
+async function updateBin(list) {
   await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
-    body: JSON.stringify(merged)
+    body: JSON.stringify(list)
   });
 }
 
-// --- USERS ONLINE ---
-async function userOnline(username) {
-  const {users_online} = await fetchBin();
-  if (!users_online.includes(username)) {
-    users_online.push(username);
-    await updateBin({users_online});
+// --- Heartbeat: mantener usuario en la lista ---
+async function heartbeat() {
+  if (!usuario || !myID) return;
+  let list = await fetchBin();
+  const now = Date.now();
+  // Eliminar desconectados
+  list = list.filter(u => now - (u.ts || 0) < DISCONNECT_TIMEOUT);
+  // Actualizar o agregarme
+  const idx = list.findIndex(u => u.user === usuario);
+  if (idx >= 0) {
+    list[idx].peerId = myID;
+    list[idx].ts = now;
+  } else {
+    list.push({ user: usuario, peerId: myID, ts: now });
   }
+  await updateBin(list);
+  showOnlineCount(list);
 }
-async function userOffline(username) {
-  const {users_online} = await fetchBin();
-  const filtered = users_online.filter(u => u !== username);
-  await updateBin({users_online: filtered});
+function startHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(heartbeat, HEARTBEAT_INTERVAL);
 }
-async function showOnlineCount() {
-  const {users_online} = await fetchBin();
-  onlineCount.textContent = `Usuarios conectados: ${users_online.length}`;
+async function removeMeFromList() {
+  let list = await fetchBin();
+  list = list.filter(u => u.user !== usuario);
+  await updateBin(list);
 }
-setInterval(showOnlineCount, 5000);
+async function showOnlineCount(list=null) {
+  if (!list) list = await fetchBin();
+  // Solo los que están activos
+  const now = Date.now();
+  const active = list.filter(u => now - (u.ts || 0) < DISCONNECT_TIMEOUT);
+  onlineCount.textContent = `Usuarios conectados: ${active.length}`;
+}
 
 // --- LOGIN/REGISTER ---
 loginBtn.onclick = async () => {
@@ -213,66 +226,47 @@ loginBtn.onclick = async () => {
   usuario = u;
   localStorage.setItem('clara_omeg_user', usuario);
   updateAuthUI();
-  await userOnline(usuario);
   setStatus('Bienvenido, ' + usuario);
+  if (peer && peer.id) {
+    myID = peer.id;
+    await heartbeat();
+    startHeartbeat();
+  }
   showOnlineCount();
 };
 
 // --- LOGOUT/Borrar usuario online ---
 logoutBtn.onclick = async () => {
-  await userOffline(usuario);
+  await removeMeFromList();
   localStorage.removeItem('clara_omeg_user');
   usuario = '';
   updateAuthUI();
   location.reload();
 };
 
-// --- P2P & cola ---
-peer.on('open', id => { myID = id; setStatus('Tu ID: ' + id); });
-
-async function enterQueue() {
-  const {queue} = await fetchBin();
-  if (!queue.includes(usuario)) {
-    queue.push(usuario);
-    await updateBin({queue});
+// --- PeerJS y vídeo ---
+peer = new Peer();
+peer.on('open', async id => {
+  myID = id;
+  setStatus('Tu ID: ' + id);
+  if (usuario) {
+    await heartbeat();
+    startHeartbeat();
   }
-  setStatus(`En cola. Usuarios totales: ${ (await fetchBin()).queue.length }`);
-}
-async function leaveQueue() {
-  try {
-    const {queue} = await fetchBin();
-    const filtered = queue.filter(id => id !== usuario);
-    await updateBin({queue: filtered});
-    setStatus('Saliste de la cola');
-  } catch (e) {
-    console.error('Error leaveQueue:', e);
-  }
-}
-async function joinRandom() {
-  const {queue, users_online} = await fetchBin();
-  const others = queue.filter(u => u !== usuario && users_online.includes(u));
-  setStatus(`Usuarios en espera: ${others.length}`);
-  if (!others.length) {
-    log('Nadie más conectado', false);
-    return;
-  }
-  const peerUser = others[Math.floor(Math.random() * others.length)];
-  startCall(peerUser);
-}
-
-// --- VIDEO/FILTROS ---
+});
 navigator.mediaDevices.getUserMedia({ video: true, audio: true })
   .then(stream => {
     localStream = stream;
     vidStart.srcObject = stream;
     vidLocal.srcObject  = stream;
-    setStatus('Stream listo. Tu ID: ' + myID);
+    setStatus('Stream listo');
   })
   .catch(err => {
     log('No access: ' + err.message);
     alert('Permite cámara y micrófono.');
   });
 
+// --- Filtros vídeo ---
 filterSelect.addEventListener('change', () => {
   const style1 = vidStart.style;
   const style2 = vidLocal.style;
@@ -286,33 +280,47 @@ filterSelect.addEventListener('change', () => {
   }
 });
 
-// --- BOTONES ---
+// --- Emparejamiento ---
 btnStart.onclick = async () => {
   btnStart.disabled = true;
   startScreen.classList.add('hidden');
   chatScreen.classList.remove('hidden');
-  await enterQueue();
+  await heartbeat();
+  startHeartbeat();
   await joinRandom();
 };
 btnSkip.onclick = async () => {
   cleanupCall();
-  await leaveQueue();
-  await enterQueue();
   await joinRandom();
 };
 
-// --- P2P logic ---
-function startCall(remoteID) {
-  log(`Llamando a ${remoteID}`, false);
+async function joinRandom() {
+  let list = await fetchBin();
+  const now = Date.now();
+  // Solo usuarios activos y que no sean yo
+  const others = list.filter(u => u.user !== usuario && (now - (u.ts || 0)) < DISCONNECT_TIMEOUT);
+  showOnlineCount(list);
+  if (!others.length) {
+    log('Nadie más conectado', false);
+    setStatus('Nadie más conectado');
+    return;
+  }
+  // Elige uno al azar y llama por su peerId
+  const picked = others[Math.floor(Math.random() * others.length)];
+  startCall(picked.peerId);
+}
+
+function startCall(remotePeerId) {
+  log(`Llamando a ${remotePeerId}`, false);
   if (currentCall) currentCall.close();
-  currentCall = peer.call(remoteID, localStream);
+  currentCall = peer.call(remotePeerId, localStream);
   setupCall(currentCall);
   btnSkip.disabled = false;
 }
 function setupCall(call) {
   call.on('stream', stream => {
     vidRemote.srcObject = stream;
-    setStatus('Conectado con ' + call.peer);
+    setStatus('Conectado');
   });
   call.on('close', cleanupCall);
   call.on('error', err => {
@@ -327,7 +335,7 @@ function cleanupCall() {
   setStatus('Conexión finalizada');
 }
 peer.on('call', call => {
-  log('Llamada entrante de ' + call.peer, false);
+  log('Llamada entrante', false);
   if (currentCall) call.close();
   currentCall = call;
   call.answer(localStream);
@@ -335,17 +343,18 @@ peer.on('call', call => {
   btnSkip.disabled = false;
 });
 
-// --- Salida: elimina usuario de online y cola ---
-window.addEventListener('beforeunload', () => { userOffline(usuario); leaveQueue(); });
-window.addEventListener('pagehide',    () => { userOffline(usuario); leaveQueue(); });
-window.addEventListener('unload',      () => { userOffline(usuario); leaveQueue(); });
+// --- Salida limpia ---
+window.addEventListener('beforeunload', () => { if(usuario) removeMeFromList(); });
+window.addEventListener('pagehide',    () => { if(usuario) removeMeFromList(); });
+window.addEventListener('unload',      () => { if(usuario) removeMeFromList(); });
 
-// Mostrar online al cargar si ya está logueado
-if (usuario) {
-  userOnline(usuario);
-  showOnlineCount();
+if (usuario && peer && peer.id) {
+  myID = peer.id;
+  heartbeat();
+  startHeartbeat();
 }
 updateAuthUI();
+showOnlineCount();
 </script>
 </body>
 </html>
