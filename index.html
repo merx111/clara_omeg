@@ -2,34 +2,53 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Chat de Vídeo Aleatorio</title>
+  <title>clara omeg</title>
+  <!-- Fuente bonita -->
+  <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <style>
+    * { box-sizing: border-box; }
     body {
+      margin: 0;
       background: #111;
       color: #eee;
       font-family: sans-serif;
-      text-align: center;
-      padding: 20px;
-    }
-    #videos {
       display: flex;
-      justify-content: center;
-      gap: 20px;
-      margin: 20px 0;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
     }
+    h1 {
+      font-family: 'Pacifico', cursive;
+      font-size: 3rem;
+      margin: 1rem 0;
+    }
+    .hidden { display: none; }
     video {
-      width: 320px;
-      height: 240px;
       background: black;
       border-radius: 8px;
+      /* transición suave al cambiar filtro/transform */
+      transition: filter .3s, transform .3s;
+    }
+    #start-screen video,
+    #chat-screen video {
+      width: 80vw;
+      max-width: 640px;
+      height: auto;
+    }
+    #chat-screen #videos {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
     }
     button {
-      padding: 10px 20px;
-      margin: 5px;
-      font-size: 1rem;
+      padding: 1rem 2rem;
+      margin: .5rem;
+      font-size: 1.25rem;
       border: none;
-      border-radius: 5px;
+      border-radius: 8px;
       background: crimson;
       color: white;
       cursor: pointer;
@@ -38,70 +57,95 @@
       background: #555;
       cursor: default;
     }
+    #filters {
+      margin-top: 1rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    select {
+      padding: .5rem;
+      font-size: 1rem;
+      border-radius: 4px;
+      border: none;
+      background: #333;
+      color: #eee;
+    }
   </style>
 </head>
 <body>
 
-  <h1>Chat de Vídeo Aleatorio</h1>
-  <button id="btnStart">Empezar</button>
-  <button id="btnSkip" disabled>Skip</button>
+  <!-- PANTALLA INICIAL -->
+  <div id="start-screen">
+    <h1>clara omeg</h1>
+    <video id="video-local-start" autoplay muted></video>
+    <div id="filters">
+      <label for="filter-select">Filtro:</label>
+      <select id="filter-select">
+        <option value="none">Ninguno</option>
+        <option value="grayscale(100%)">Escala de grises</option>
+        <option value="sepia(100%)">Sepia</option>
+        <option value="invert(100%)">Invertir</option>
+        <option value="contrast(200%)">Contraste ↑</option>
+        <option value="mirror">Espejo</option>
+        <option value="zoom">Zoom (cara grande)</option>
+        <option value="blur(5px)">Desenfoque</option>
+        <option value="brightness(150%)">Brillo ↑</option>
+      </select>
+    </div>
+    <button id="btnStart">Comenzar</button>
+  </div>
 
-  <div id="videos">
-    <video id="video-local" autoplay muted></video>
-    <video id="video-remote" autoplay></video>
+  <!-- PANTALLA DE CHAT -->
+  <div id="chat-screen" class="hidden">
+    <div id="videos">
+      <video id="video-local" autoplay muted></video>
+      <video id="video-remote" autoplay></video>
+    </div>
+    <button id="btnSkip" disabled>Skip</button>
   </div>
 
   <script>
-    // ——— CONFIGURACIÓN ———
+    // ——— CONFIG JSONBin ———
     const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
     const BIN_ID  = '684abe418561e97a5022f0ef';
 
-    // ——— VARIABLES GLOBALES ———
+    // ——— DOM ———
+    const startScreen    = document.getElementById('start-screen');
+    const chatScreen     = document.getElementById('chat-screen');
+    const vidStart       = document.getElementById('video-local-start');
+    const vidLocal       = document.getElementById('video-local');
+    const vidRemote      = document.getElementById('video-remote');
+    const filterSelect   = document.getElementById('filter-select');
+    const btnStart       = document.getElementById('btnStart');
+    const btnSkip        = document.getElementById('btnSkip');
+
+    // ——— P2P & STREAM ———
     const peer       = new Peer();
-    let myID         = '';
-    let localStream  = null;
-    let currentCall  = null;
+    let myID         = '', localStream = null, currentCall = null;
 
-    const btnStart  = document.getElementById('btnStart');
-    const btnSkip   = document.getElementById('btnSkip');
-    const vidLocal  = document.getElementById('video-local');
-    const vidRemote = document.getElementById('video-remote');
-
-    // ——— UTILIDADES JSONBin ———
+    // ——— JSONBin UTILS ———
     async function fetchBin() {
       const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-        headers: { 'X-Master-Key': API_KEY }
+        headers: {'X-Master-Key': API_KEY}
       });
-      if (!res.ok) throw new Error('Fetch bin error ' + res.status);
+      if (!res.ok) throw new Error('Error fetchBin ' + res.status);
       const { record } = await res.json();
-      // Si no es array, inicializarlo
       return Array.isArray(record) ? record : [];
     }
-
     async function updateBin(list) {
       const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type':'application/json',
           'X-Master-Key': API_KEY
         },
         body: JSON.stringify(list)
       });
-      if (!res.ok) throw new Error('Update bin error ' + res.status);
+      if (!res.ok) throw new Error('Error updateBin ' + res.status);
     }
 
-    // ——— LÓGICA DE EMPAREJAMIENTO ———
-    async function joinRandom() {
-      const waiting = await fetchBin();
-      const others = waiting.filter(id => id !== myID);
-      if (others.length === 0) {
-        alert('No hay nadie disponible, espera un momento...');
-        return;
-      }
-      const peerID = others[Math.floor(Math.random() * others.length)];
-      startCall(peerID);
-    }
-
+    // ——— EMPAREJAMIENTO ———
     async function enterQueue() {
       const list = await fetchBin();
       if (!list.includes(myID)) {
@@ -109,61 +153,90 @@
         await updateBin(list);
       }
     }
-
     async function leaveQueue() {
       const list = await fetchBin();
-      const filtered = list.filter(id => id !== myID);
-      await updateBin(filtered);
+      await updateBin(list.filter(id => id !== myID));
+    }
+    async function joinRandom() {
+      const list = await fetchBin();
+      const others = list.filter(id => id !== myID);
+      if (!others.length) {
+        alert('No hay nadie disponible, espera un momento…');
+        return;
+      }
+      const peerID = others[Math.floor(Math.random() * others.length)];
+      startCall(peerID);
     }
 
-    // ——— INICIAR LLAMADA ———
+    // ——— LLAMADAS ———
     function startCall(remoteID) {
       if (currentCall) currentCall.close();
       currentCall = peer.call(remoteID, localStream);
-      setupCallHandlers(currentCall);
+      setupCall(currentCall);
       btnSkip.disabled = false;
     }
-
-    function setupCallHandlers(call) {
-      call.on('stream', stream => {
-        vidRemote.srcObject = stream;
-      });
+    function setupCall(call) {
+      call.on('stream', s => vidRemote.srcObject = s);
       call.on('close', cleanupCall);
       call.on('error', cleanupCall);
     }
-
     function cleanupCall() {
       vidRemote.srcObject = null;
       currentCall = null;
       btnSkip.disabled = true;
     }
 
-    // ——— EVENTOS PEERJS ———
-    peer.on('open', id => {
-      myID = id;
-    });
-
+    // ——— PEERJS ———
+    peer.on('open', id => myID = id);
     peer.on('call', call => {
       if (currentCall) call.close();
       currentCall = call;
       call.answer(localStream);
-      setupCallHandlers(call);
+      setupCall(call);
       btnSkip.disabled = false;
     });
 
-    // ——— ARRANQUE DE CÁMARA ———
+    // ——— STREAM LOCAL & FILTROS ———
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
         localStream = stream;
+        vidStart.srcObject = stream;
         vidLocal.srcObject = stream;
       })
-      .catch(() => {
-        alert('Permite el acceso a cámara y micrófono para usar la web.');
-      });
+      .catch(() => alert('Permite cámara y micrófono.'));
+
+    filterSelect.addEventListener('change', () => {
+      const vStart = vidStart.style;
+      const vLocal = vidLocal.style;
+      const val = filterSelect.value;
+      // espejo
+      if (val === 'mirror') {
+        vStart.transform = 'scaleX(-1)';
+        vLocal.transform = 'scaleX(-1)';
+        vStart.filter = vLocal.filter = '';
+      }
+      // zoom
+      else if (val === 'zoom') {
+        vStart.transform = 'scale(2)';
+        vStart.transformOrigin = 'center center';
+        vLocal.transform = 'scale(2)';
+        vLocal.transformOrigin = 'center center';
+        vStart.filter = vLocal.filter = '';
+      }
+      // resto filtros CSS
+      else {
+        vStart.transform = '';
+        vLocal.transform = '';
+        vStart.filter = val;
+        vLocal.filter = val;
+      }
+    });
 
     // ——— BOTONES ———
     btnStart.onclick = async () => {
       btnStart.disabled = true;
+      startScreen.classList.add('hidden');
+      chatScreen.classList.remove('hidden');
       await enterQueue();
       await joinRandom();
     };
@@ -175,9 +248,7 @@
       await joinRandom();
     };
 
-    // Al cerrar o recargar, nos retiramos de la cola
     window.addEventListener('beforeunload', leaveQueue);
   </script>
-
 </body>
 </html>
