@@ -12,291 +12,281 @@
       background: #111;
       color: #eee;
       font-family: sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
       height: 100vh;
       overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
       text-align: center;
     }
-    #status { margin: .5rem; font-size: .9rem; color: #ccc; }
-    #log    { margin: .5rem; font-size: .9rem; color: #f88; min-height: 1.2rem; }
+    .screen {
+      width: 100%;
+      max-width: 480px;
+      padding: 1rem;
+      overflow-y: auto;
+    }
     h1 {
       font-family: 'Pacifico', cursive;
-      font-size: 3rem;
-      margin: 1rem 0;
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
     }
-    video {
-      background: black;
-      border-radius: 8px;
-      transition: filter .3s, transform .3s;
-    }
-    #start-screen video,
-    #chat-screen video {
-      width: 80vw;
-      max-width: 640px;
-      height: auto;
-    }
-    #chat-screen #videos {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
+    input {
+      width: 100%;
+      padding: .75rem;
+      margin: .5rem 0;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
     }
     button {
-      padding: 1rem 2rem;
-      margin: .5rem;
+      width: 100%;
+      padding: 1rem;
+      margin: .5rem 0;
       font-size: 1.1rem;
       border: none;
-      border-radius: 8px;
+      border-radius: 6px;
       background: crimson;
       color: white;
       cursor: pointer;
     }
-    button:disabled {
-      background: #555;
-      cursor: default;
-    }
-    #filters {
-      margin-top: 1rem;
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-    }
-    select {
-      padding: .4rem;
-      font-size: 1rem;
-      border-radius: 4px;
-      border: none;
-      background: #333;
-      color: #eee;
-    }
+    .half { width: 48%; display: inline-block; }
     .hidden { display: none; }
+    video {
+      width: 100%;
+      border-radius: 8px;
+      background: black;
+      margin: .5rem 0;
+    }
+    #status, #statusC { font-size: .9rem; color: #ccc; margin: .5rem 0; }
+    #log, #logC    { font-size: .9rem; color: #f88; min-height: 1.2rem; }
+    #videos { display: flex; gap: .5rem; justify-content: center; flex-wrap: wrap; }
+    #videos video { width: 48%; max-width: 200px; }
   </style>
 </head>
 <body>
 
-  <div id="status">Inicializando…</div>
-  <div id="log"></div>
-
-  <!-- PANTALLA INICIAL -->
-  <div id="start-screen">
+  <!-- REGISTER / LOGIN -->
+  <div id="auth-screen" class="screen">
     <h1>clara omeg</h1>
-    <video id="video-local-start" autoplay muted></video>
-    <div id="filters">
-      <label for="filter-select">Filtro:</label>
-      <select id="filter-select">
-        <option value="none">Ninguno</option>
-        <option value="grayscale(100%)">Escala de grises</option>
-        <option value="sepia(100%)">Sepia</option>
-        <option value="invert(100%)">Invertir</option>
-        <option value="contrast(200%)">Contraste ↑</option>
-        <option value="mirror">Espejo</option>
-        <option value="zoom">Zoom (cara grande)</option>
-      </select>
-    </div>
-    <button id="btnStart">Comenzar</button>
+    <input id="inpUser" type="text" placeholder="Usuario" autocomplete="username">
+    <input id="inpPass" type="password" placeholder="Contraseña" autocomplete="current-password">
+    <div class="half"><button id="btnRegister">Registrar</button></div>
+    <div class="half"><button id="btnLogin">Iniciar Sesión</button></div>
+    <div id="authLog"></div>
   </div>
 
-  <!-- PANTALLA DE CHAT -->
-  <div id="chat-screen" class="hidden">
+  <!-- PREVIEW -->
+  <div id="preview-screen" class="screen hidden">
+    <h1>Tu Cámara</h1>
+    <video id="video-local-preview" autoplay muted></video>
+    <div id="status">Esperando…</div>
+    <div id="log"></div>
+    <button id="btnBegin">Comenzar</button>
+  </div>
+
+  <!-- CHAT -->
+  <div id="chat-screen" class="screen hidden">
+    <h1>Conectando…</h1>
     <div id="videos">
       <video id="video-local" autoplay muted></video>
       <video id="video-remote" autoplay></video>
     </div>
+    <div id="statusC">Inicializando…</div>
+    <div id="logC"></div>
     <button id="btnSkip" disabled>Skip</button>
   </div>
 
-  <script>
-    // — CONFIG JSONBin —
-    const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
-    const BIN_ID  = '684abe418561e97a5022f0ef';
-    // tiempo de inactividad tras el cual se purga (20 s)
-    const TIMEOUT = 20_000;
+<script>
+  // — CONFIG JSONBin —
+  const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
+  const BIN_ID  = '684abe418561e97a5022f0ef';
+  const TIMEOUT = 20_000;
 
-    // — DOM —
-    const status       = document.getElementById('status');
-    const logDiv       = document.getElementById('log');
-    const startScreen  = document.getElementById('start-screen');
-    const chatScreen   = document.getElementById('chat-screen');
-    const vidStart     = document.getElementById('video-local-start');
-    const vidLocal     = document.getElementById('video-local');
-    const vidRemote    = document.getElementById('video-remote');
-    const filterSelect = document.getElementById('filter-select');
-    const btnStart     = document.getElementById('btnStart');
-    const btnSkip      = document.getElementById('btnSkip');
+  // — DOM refs —
+  const authSC    = document.getElementById('auth-screen');
+  const previewSC = document.getElementById('preview-screen');
+  const chatSC    = document.getElementById('chat-screen');
 
-    // — P2P & STREAM —
-    const peer       = new Peer();
-    let myID         = '';
-    let localStream  = null;
-    let currentCall  = null;
+  const inpUser   = document.getElementById('inpUser');
+  const inpPass   = document.getElementById('inpPass');
+  const btnRegister = document.getElementById('btnRegister');
+  const btnLogin    = document.getElementById('btnLogin');
+  const authLog     = document.getElementById('authLog');
 
-    function setStatus(txt) {
-      status.textContent = txt;
-    }
-    function log(txt, isError = true) {
-      logDiv.textContent = txt;
-      console[isError ? 'error' : 'log'](txt);
-    }
+  const vidPrev   = document.getElementById('video-local-preview');
+  const btnBegin  = document.getElementById('btnBegin');
+  const statusP   = document.getElementById('status');
+  const logP      = document.getElementById('log');
 
-    // — JSONBin helpers (objeto id→timestamp) —
-    async function fetchBin() {
-      setStatus('Obteniendo cola…');
-      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-        headers: {'X-Master-Key': API_KEY}
-      });
-      if (!res.ok) {
-        log('Error fetchBin ' + res.status);
-        return {};
-      }
-      const { record } = await res.json();
-      // aseguramos que sea objeto
-      return (record && typeof record === 'object') ? record : {};
-    }
-    async function updateBin(obj) {
-      setStatus('Actualizando cola…');
-      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Master-Key': API_KEY
-        },
-        body: JSON.stringify(obj)
-      });
-      if (!res.ok) log('Error updateBin ' + res.status);
-    }
+  const vidLocal  = document.getElementById('video-local');
+  const vidRemote = document.getElementById('video-remote');
+  const btnSkip   = document.getElementById('btnSkip');
+  const statusC   = document.getElementById('statusC');
+  const logC      = document.getElementById('logC');
 
-    // — MANTENIMIENTO de cola con timestamps —
-    async function enterQueue() {
-      const bin = await fetchBin();
-      // purgar inactivos
-      const now = Date.now();
-      for (const [id, ts] of Object.entries(bin)) {
-        if (now - ts > TIMEOUT) delete bin[id];
-      }
-      // actualizar mi timestamp
-      bin[myID] = now;
-      await updateBin(bin);
-      setStatus(`En cola. Usuarios activos: ${Object.keys(bin).length}`);
-    }
+  // — P2P & STATE —
+  const peer       = new Peer();
+  let myID         = '';
+  let localStream  = null;
+  let currentCall  = null;
+  let userNick     = '';
 
-    async function leaveQueue() {
-      const bin = await fetchBin();
-      delete bin[myID];
-      await updateBin(bin);
-      setStatus('Saliste de la cola');
-    }
-
-    async function joinRandom() {
-      const bin = await fetchBin();
-      // purgar y actualizar
-      const now = Date.now();
-      for (const [id, ts] of Object.entries(bin)) {
-        if (now - ts > TIMEOUT) delete bin[id];
-      }
-      await updateBin(bin);
-      // emparejar
-      const others = Object.keys(bin).filter(id => id !== myID);
-      setStatus(`Usuarios disponibles: ${others.length}`);
-      if (!others.length) {
-        log('Nadie más conectado', false);
-        return;
-      }
-      const peerID = others[Math.floor(Math.random() * others.length)];
-      startCall(peerID);
-    }
-
-    // — P2P CALLS —
-    function startCall(remoteID) {
-      log(`Llamando a ${remoteID}`, false);
-      if (currentCall) currentCall.close();
-      currentCall = peer.call(remoteID, localStream);
-      setupCall(currentCall);
-      btnSkip.disabled = false;
-    }
-    function setupCall(call) {
-      call.on('stream', stream => {
-        vidRemote.srcObject = stream;
-        setStatus('Conectado con ' + call.peer);
-      });
-      call.on('close', cleanupCall);
-      call.on('error', err => {
-        log('Error en la llamada: ' + err, true);
-        cleanupCall();
-      });
-    }
-    function cleanupCall() {
-      vidRemote.srcObject = null;
-      currentCall = null;
-      btnSkip.disabled = true;
-      setStatus('Conexión finalizada');
-    }
-
-    // — PEERJS EVENTS —
-    peer.on('open', id => {
-      myID = id;
-      setStatus('Tu ID: ' + id);
+  // — UTILITIES JSONBin (record = { users: {...}, queue: {...} }) —
+  async function fetchBin() {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: {'X-Master-Key': API_KEY}
     });
-    peer.on('call', call => {
-      log('Llamada entrante de ' + call.peer, false);
-      if (currentCall) call.close();
-      currentCall = call;
-      call.answer(localStream);
-      setupCall(call);
-      btnSkip.disabled = false;
-    });
-
-    // — LOCAL STREAM & FILTERS —
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        localStream = stream;
-        vidStart.srcObject = stream;
-        vidLocal.srcObject  = stream;
-        setStatus('Stream listo. Tu ID: ' + myID);
-        // cada 10 s refrescamos mi timestamp
-        setInterval(enterQueue, TIMEOUT / 2);
-      })
-      .catch(err => {
-        log('No access: ' + err.message);
-        alert('Permite cámara y micrófono.');
-      });
-
-    filterSelect.addEventListener('change', () => {
-      const s1 = vidStart.style, s2 = vidLocal.style, val = filterSelect.value;
-      if (val === 'mirror') {
-        [s1, s2].forEach(s => { s.transform = 'scaleX(-1)'; s.filter = ''; });
-      } else if (val === 'zoom') {
-        [s1, s2].forEach(s => {
-          s.transform = 'scale(2)';
-          s.transformOrigin = 'center center';
-          s.filter = '';
-        });
-      } else {
-        [s1, s2].forEach(s => { s.transform = ''; s.filter = val; });
-      }
-    });
-
-    // — BOTONES —
-    btnStart.onclick = async () => {
-      btnStart.disabled = true;
-      startScreen.classList.add('hidden');
-      chatScreen.classList.remove('hidden');
-      await enterQueue();
-      await joinRandom();
+    if (!res.ok) return { users:{}, queue:{} };
+    const { record } = await res.json();
+    return {
+      users: (record.users instanceof Object) ? record.users : {},
+      queue: (record.queue instanceof Object) ? record.queue : {}
     };
-    btnSkip.onclick = async () => {
-      cleanupCall();
-      await leaveQueue();
-      await enterQueue();
-      await joinRandom();
-    };
+  }
+  async function updateBin(data) {
+    await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+      method:'PUT',
+      headers:{
+        'Content-Type':'application/json',
+        'X-Master-Key':API_KEY
+      },
+      body: JSON.stringify(data)
+    });
+  }
 
-    // — Al cerrar, nos borramos de la cola de forma explícita —
-    window.addEventListener('beforeunload', leaveQueue);
-    window.addEventListener('pagehide',    leaveQueue);
-    window.addEventListener('unload',      leaveQueue);
+  // — AUTH —
+  async function registerUser(nick, pass) {
+    const bin = await fetchBin();
+    if (bin.users[nick]) return false;
+    bin.users[nick] = pass;
+    await updateBin(bin);
+    return true;
+  }
+  async function loginUser(nick, pass) {
+    const bin = await fetchBin();
+    return bin.users[nick] === pass;
+  }
 
-  </script>
+  btnRegister.onclick = async () => {
+    const u = inpUser.value.trim(), p = inpPass.value;
+    if (!u || !p) { authLog.textContent='Usuario y clave obligatorios'; return; }
+    if (await registerUser(u,p)) {
+      authLog.textContent = 'Registrado con éxito. Ahora inicia sesión.';
+    } else {
+      authLog.textContent = 'El usuario existe.';
+    }
+  };
+
+  btnLogin.onclick = async () => {
+    const u = inpUser.value.trim(), p = inpPass.value;
+    if (await loginUser(u,p)) {
+      userNick = u;
+      authSC.classList.add('hidden');
+      previewSC.classList.remove('hidden');
+      initStream();
+    } else {
+      authLog.textContent = 'Credenciales inválidas';
+    }
+  };
+
+  // — STREAM & PREVIEW —
+  function setStatus(txt){ statusP.textContent = txt; }
+  function log(txt){ logP.textContent = txt; }
+  async function initStream() {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+      vidPrev.srcObject = localStream;
+    } catch {
+      alert('Permite cámara y micrófono.');
+    }
+  }
+
+  btnBegin.onclick = async () => {
+    previewSC.classList.add('hidden');
+    chatSC.classList.remove('hidden');
+    await clearQueue();      // limpiar cola de IDs previos
+    await enterQueue();      // entrar a cola
+    startRefreshQueue();     // mantener vivo en cola
+    await joinRandom();      // emparejar
+  };
+
+  // — QUEUE w/ timestamps —
+  async function clearQueue() {
+    const bin = await fetchBin();
+    bin.queue = {};
+    await updateBin(bin);
+  }
+  async function enterQueue() {
+    const bin = await fetchBin();
+    const now = Date.now();
+    // purga
+    for (let [id,ts] of Object.entries(bin.queue)) {
+      if (now - ts > TIMEOUT) delete bin.queue[id];
+    }
+    bin.queue[peer.id] = now;
+    await updateBin(bin);
+    setStatusC(`En cola: ${Object.keys(bin.queue).length}`);
+  }
+  async function leaveQueue() {
+    const bin = await fetchBin();
+    delete bin.queue[peer.id];
+    await updateBin(bin);
+  }
+  function startRefreshQueue() {
+    setInterval(enterQueue, TIMEOUT/2);
+  }
+  async function joinRandom() {
+    const bin = await fetchBin();
+    const now = Date.now();
+    for (let [id,ts] of Object.entries(bin.queue)) {
+      if (now - ts > TIMEOUT) delete bin.queue[id];
+    }
+    await updateBin(bin);
+    const others = Object.keys(bin.queue).filter(id=>id!==peer.id);
+    setStatusC(`Disponibles: ${others.length}`);
+    if (!others.length) { logC('Nadie disponible', false); return; }
+    startCall(others[Math.floor(Math.random()*others.length)]);
+  }
+
+  // — P2P CALLS & UI —
+  function setStatusC(txt){ statusC.textContent = txt; }
+  function logC(txt, isError=true){ logC.textContent=txt; console[isError?'error':'log'](txt) }
+  function startCall(remoteID) {
+    currentCall?.close();
+    const call = peer.call(remoteID, localStream);
+    setupCall(call);
+    btnSkip.disabled = false;
+  }
+  function setupCall(call) {
+    currentCall = call;
+    call.on('stream', s=>vidRemote.srcObject=s);
+    call.on('close',cleanup);
+    call.on('error',cleanup);
+  }
+  function cleanup() {
+    vidRemote.srcObject = null;
+    currentCall = null;
+    btnSkip.disabled = true;
+  }
+
+  peer.on('open', id => { /* nothing */ });
+  peer.on('call', call => {
+    currentCall?.close();
+    call.answer(localStream);
+    setupCall(call);
+    btnSkip.disabled = false;
+  });
+
+  btnSkip.onclick = async () => {
+    cleanup();
+    await leaveQueue();
+    await enterQueue();
+    await joinRandom();
+  };
+
+  window.addEventListener('beforeunload', leaveQueue);
+  window.addEventListener('pagehide',    leaveQueue);
+  window.addEventListener('unload',      leaveQueue);
+</script>
 </body>
 </html>
