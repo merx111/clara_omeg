@@ -2,52 +2,34 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>clara omeg</title>
-  <!-- Google Font -->
-  <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+  <title>Chat de Vídeo Aleatorio</title>
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <style>
     body {
-      margin: 0;
       background: #111;
       color: #eee;
       font-family: sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    #videos {
       display: flex;
-      flex-direction: column;
-      align-items: center;
-      height: 100vh;
-      overflow: hidden;
-    }
-    h1 {
-      font-family: 'Pacifico', cursive;
-      font-size: 3rem;
-      margin-bottom: 1rem;
-    }
-    .hidden {
-      display: none;
+      justify-content: center;
+      gap: 20px;
+      margin: 20px 0;
     }
     video {
-      border-radius: 8px;
+      width: 320px;
+      height: 240px;
       background: black;
-    }
-    #start-screen video,
-    #chat-screen video {
-      width: 80vw;
-      max-width: 640px;
-      height: auto;
-    }
-    #chat-screen #videos {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
+      border-radius: 8px;
     }
     button {
-      padding: 1rem 2rem;
-      margin: 1rem;
-      font-size: 1.25rem;
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 1rem;
       border: none;
-      border-radius: 8px;
+      border-radius: 5px;
       background: crimson;
       color: white;
       cursor: pointer;
@@ -56,82 +38,48 @@
       background: #555;
       cursor: default;
     }
-    #filters {
-      margin-top: 1rem;
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-    }
-    #filters label {
-      font-size: 1rem;
-    }
-    select {
-      padding: 0.5rem;
-      font-size: 1rem;
-      border-radius: 4px;
-      border: none;
-    }
   </style>
 </head>
 <body>
 
-  <!-- PANTALLA DE INICIO -->
-  <div id="start-screen">
-    <h1>clara omeg</h1>
-    <video id="video-local-start" autoplay muted></video>
-    <div id="filters">
-      <label for="filter-select">Filtro:</label>
-      <select id="filter-select">
-        <option value="none">Ninguno</option>
-        <option value="grayscale(100%)">Escala de grises</option>
-        <option value="sepia(100%)">Sepia</option>
-        <option value="invert(100%)">Invertir</option>
-        <option value="contrast(200%)">Contraste ↑</option>
-      </select>
-    </div>
-    <button id="btnStart">Comenzar</button>
-  </div>
+  <h1>Chat de Vídeo Aleatorio</h1>
+  <button id="btnStart">Empezar</button>
+  <button id="btnSkip" disabled>Skip</button>
 
-  <!-- PANTALLA DE CHAT -->
-  <div id="chat-screen" class="hidden">
-    <div id="videos">
-      <video id="video-local" autoplay muted></video>
-      <video id="video-remote" autoplay></video>
-    </div>
-    <button id="btnSkip" disabled>Skip</button>
+  <div id="videos">
+    <video id="video-local" autoplay muted></video>
+    <video id="video-remote" autoplay></video>
   </div>
 
   <script>
-    // ——— CONFIGuRACIÓN JSONBin ———
+    // ——— CONFIGURACIÓN ———
     const API_KEY = '$2a$10$W7r2d0gmDZE45aqzwLFbTumNYrlgnya.eify2ghIr2Ebrf0aupxWu';
     const BIN_ID  = '684abe418561e97a5022f0ef';
 
-    // ——— ELEMENTOS DOM ———
-    const startScreen    = document.getElementById('start-screen');
-    const chatScreen     = document.getElementById('chat-screen');
-    const vidLocalStart  = document.getElementById('video-local-start');
-    const vidLocal       = document.getElementById('video-local');
-    const vidRemote      = document.getElementById('video-remote');
-    const btnStart       = document.getElementById('btnStart');
-    const btnSkip        = document.getElementById('btnSkip');
-    const filterSelect   = document.getElementById('filter-select');
+    // ——— VARIABLES GLOBALES ———
+    const peer       = new Peer();
+    let myID         = '';
+    let localStream  = null;
+    let currentCall  = null;
 
-    // ——— VARIABLES ———
-    const peer      = new Peer();
-    let myID        = '';
-    let localStream = null;
-    let currentCall = null;
+    const btnStart  = document.getElementById('btnStart');
+    const btnSkip   = document.getElementById('btnSkip');
+    const vidLocal  = document.getElementById('video-local');
+    const vidRemote = document.getElementById('video-remote');
 
     // ——— UTILIDADES JSONBin ———
     async function fetchBin() {
       const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
         headers: { 'X-Master-Key': API_KEY }
       });
+      if (!res.ok) throw new Error('Fetch bin error ' + res.status);
       const { record } = await res.json();
+      // Si no es array, inicializarlo
       return Array.isArray(record) ? record : [];
     }
+
     async function updateBin(list) {
-      await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -139,19 +87,21 @@
         },
         body: JSON.stringify(list)
       });
+      if (!res.ok) throw new Error('Update bin error ' + res.status);
     }
 
-    // ——— EMPAREJAMIENTO ———
+    // ——— LÓGICA DE EMPAREJAMIENTO ———
     async function joinRandom() {
       const waiting = await fetchBin();
       const others = waiting.filter(id => id !== myID);
-      if (!others.length) {
+      if (others.length === 0) {
         alert('No hay nadie disponible, espera un momento...');
         return;
       }
       const peerID = others[Math.floor(Math.random() * others.length)];
       startCall(peerID);
     }
+
     async function enterQueue() {
       const list = await fetchBin();
       if (!list.includes(myID)) {
@@ -159,19 +109,21 @@
         await updateBin(list);
       }
     }
+
     async function leaveQueue() {
       const list = await fetchBin();
       const filtered = list.filter(id => id !== myID);
       await updateBin(filtered);
     }
 
-    // ——— LLAMADA P2P ———
+    // ——— INICIAR LLAMADA ———
     function startCall(remoteID) {
       if (currentCall) currentCall.close();
       currentCall = peer.call(remoteID, localStream);
       setupCallHandlers(currentCall);
       btnSkip.disabled = false;
     }
+
     function setupCallHandlers(call) {
       call.on('stream', stream => {
         vidRemote.srcObject = stream;
@@ -179,16 +131,18 @@
       call.on('close', cleanupCall);
       call.on('error', cleanupCall);
     }
+
     function cleanupCall() {
       vidRemote.srcObject = null;
       currentCall = null;
       btnSkip.disabled = true;
     }
 
-    // ——— INICIALIZACIÓN PEERJS ———
+    // ——— EVENTOS PEERJS ———
     peer.on('open', id => {
       myID = id;
     });
+
     peer.on('call', call => {
       if (currentCall) call.close();
       currentCall = call;
@@ -197,34 +151,23 @@
       btnSkip.disabled = false;
     });
 
-    // ——— CÁMARA & FILTROS ———
+    // ——— ARRANQUE DE CÁMARA ———
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
         localStream = stream;
-        vidLocalStart.srcObject = stream;
-        vidLocal.srcObject      = stream;
+        vidLocal.srcObject = stream;
       })
       .catch(() => {
-        alert('Permite acceso a cámara y micrófono para continuar.');
+        alert('Permite el acceso a cámara y micrófono para usar la web.');
       });
-
-    // Cambiar filtro en el vídeo local
-    filterSelect.addEventListener('change', () => {
-      const f = filterSelect.value;
-      vidLocalStart.style.filter = f;
-      vidLocal.style.filter      = f;
-    });
 
     // ——— BOTONES ———
     btnStart.onclick = async () => {
       btnStart.disabled = true;
-      // Pasar a pantalla de chat
-      startScreen.classList.add('hidden');
-      chatScreen.classList.remove('hidden');
-      // Entrar en cola y emparejar
       await enterQueue();
       await joinRandom();
     };
+
     btnSkip.onclick = async () => {
       cleanupCall();
       await leaveQueue();
@@ -232,8 +175,9 @@
       await joinRandom();
     };
 
-    // Al cerrar, salimos de la cola
+    // Al cerrar o recargar, nos retiramos de la cola
     window.addEventListener('beforeunload', leaveQueue);
   </script>
+
 </body>
 </html>
